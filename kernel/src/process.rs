@@ -27,9 +27,8 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(id: u64, name: &'static str, stack_size: usize, frame_allocator: &mut impl FrameAllocator<Size4KiB>, phys_mem_offset: VirtAddr) -> Self {
+    pub fn new(id: u64, name: &'static str, stack_size: usize, is_user: bool, frame_allocator: &mut impl FrameAllocator<Size4KiB>, phys_mem_offset: VirtAddr) -> Self {
         let mut stack: Vec<u8> = Vec::with_capacity(stack_size);
-        let is_user = id >= 4;
         unsafe {
             stack.set_len(stack_size);
             for i in 0..stack_size {

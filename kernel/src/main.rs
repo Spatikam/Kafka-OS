@@ -20,18 +20,21 @@ use blog_os::elf_loader::ElfLoader;
 use spin::Mutex;
 use blog_os::task::mouse::MouseStream;
 use futures_util::StreamExt;
-use blog_os::cli;
+
 use embedded_graphics::{
-    mono_font::{ascii::FONT_6X10, MonoTextStyle},
     pixelcolor::Rgb888,
     prelude::*,
-    primitives::{Rectangle, PrimitiveStyle},
-    text::Text,
 };
 
 use blog_os::process;
 
+use blog_os::graphics::buffer::FrameBufferDisplay;
+use blog_os::gui::{window::{Window, WindowManager}, mouse::Mouse};
+
 static RAM_DISK: &[u8] = include_bytes!("../disk.tar");
+
+// Global Display Driver (Unsafe access required)
+static mut GUI_DISPLAY: Option<FrameBufferDisplay> = None;
 
 const BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
@@ -54,6 +57,46 @@ fn process_b() {
         crate::process::sys_yield();
     }
 }
+
+
+fn process_gui() {
+    crate::println!(" -> DEBUG GUI Process Started");
+
+    // Read framebuffer dimensions (already set up by kernel_main)
+    let (width, height) = unsafe {
+        let ptr = &raw const GUI_DISPLAY;
+        if let Some(display) = &*ptr {
+            (display.size().width as i32, display.size().height as i32)
+        } else {
+            (800, 600)
+        }
+    };
+
+    let mut mouse_cursor = Mouse::new(width, height);
+    let mut wm = WindowManager::new(width as u32, height as u32);
+    wm.add_window(Window::new(100, 100, 400, 300, "Terminal", Rgb888::BLACK));
+    wm.add_window(Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE));
+
+    loop {
+        // 1. Poll mouse (non-blocking – no async needed)
+        if let Some(packet) = blog_os::task::mouse::try_get_packet() {
+            mouse_cursor.update(&packet);
+        }
+
+        // 2. Draw frame
+        unsafe {
+            let ptr = &raw mut GUI_DISPLAY;
+            if let Some(display) = &mut *ptr {
+                wm.draw_windows(display).ok();
+                mouse_cursor.draw(display).ok();
+            }
+        }
+
+        // 3. Yield so the scheduler can run other processes
+        blog_os::process::sys_yield();
+    }
+}
+
 
 fn process_shell() {
     crate::println!("\n -> DEBUG Shell Process Started");
@@ -92,20 +135,42 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         Mutex::new(blog_os::fs::OverlayFileSystem::new(RAM_DISK))
     });
 
+    // --- INIT GUI ---
+    if let Some(framebuffer) = boot_info.framebuffer.as_ref() {
+        unsafe {
+            // Reconstruct FrameBuffer to get mutable access to the slice
+            // CAUTION: This assumes we have exclusive access.
+            let info = framebuffer.info();
+            let ptr = framebuffer.buffer().as_ptr() as *mut u8;
+            let len = framebuffer.buffer().len();
+            let slice = core::slice::from_raw_parts_mut(ptr, len);
+            
+            GUI_DISPLAY = Some(FrameBufferDisplay::new(slice, info));
+        }
+        crate::println!("GUI Display Initialized!");
+    } else {
+        crate::println!("No Framebuffer found! GUI Disabled.");
+    }
+    // ----------------
+
     #[cfg(test)]
     test_main();
 
     crate::println!("\n[SCHEDULER] Spawning Processes...");
 
-    let mut p0 = process::Process::new(0, "Boot", 4096, &mut frame_allocator, phys_mem_offset);
-    let mut p1 = process::Process::new(1, "ProcA", 4096, &mut frame_allocator, phys_mem_offset);
+    let mut p0 = process::Process::new(0, "Boot",   4096,  false, &mut frame_allocator, phys_mem_offset);
+    let mut p1 = process::Process::new(1, "ProcA",  4096,  false, &mut frame_allocator, phys_mem_offset);
     p1.init_stack(process_a as u64);
-    let mut p2 = process::Process::new(2, "ProcB", 4096, &mut frame_allocator, phys_mem_offset);
+    let mut p2 = process::Process::new(2, "ProcB",  4096,  false, &mut frame_allocator, phys_mem_offset);
     p2.init_stack(process_b as u64);
-    let mut p3 = process::Process::new(3, "Shell", 32768, &mut frame_allocator, phys_mem_offset);
+    let mut p3 = process::Process::new(3, "Shell",  32768, false, &mut frame_allocator, phys_mem_offset);
     p3.init_stack(process_shell as u64);
-    let mut p_user = process::Process::new(4, "UserApp", 32768, &mut frame_allocator, phys_mem_offset);
 
+    // GUI runs kernel code — must use kernel page table (is_user = false)
+    let mut p_gui = process::Process::new(4, "GUI", 65536, false, &mut frame_allocator, phys_mem_offset);
+    p_gui.init_stack(process_gui as u64);
+
+    let mut p_user = process::Process::new(5, "UserApp", 32768, true, &mut frame_allocator, phys_mem_offset);
     let fs = blog_os::fs::TarFileSystem::new(RAM_DISK);
     let elf_data_unaligned = fs.read_file("test_app").expect("Could not find test_app");
     use alloc::vec::Vec;
@@ -145,6 +210,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         sched.add_process(p1);
         sched.add_process(p2);
         sched.add_process(p3);
+        sched.add_process(p_gui);
         sched.add_process(p_user);
     }
 
