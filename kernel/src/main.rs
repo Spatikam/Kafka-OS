@@ -28,7 +28,7 @@ use embedded_graphics::{
 
 use blog_os::process;
 
-use blog_os::graphics::buffer::FrameBufferDisplay;
+use blog_os::gui::buffer::FrameBufferDisplay;
 use blog_os::gui::{window::{Window, WindowManager}, mouse::Mouse};
 
 static RAM_DISK: &[u8] = include_bytes!("../disk.tar");
@@ -58,36 +58,44 @@ fn process_b() {
     }
 }
 
-
 fn process_gui() {
     crate::println!(" -> DEBUG GUI Process Started");
 
+    let ptr = &raw mut GUI_DISPLAY;
     // Read framebuffer dimensions (already set up by kernel_main)
     let (width, height) = unsafe {
-        let ptr = &raw const GUI_DISPLAY;
         if let Some(display) = &*ptr {
             (display.size().width as i32, display.size().height as i32)
         } else {
-            (800, 600)
+            (1080, 720)
         }
     };
 
-    let mut mouse_cursor = Mouse::new(width, height);
+    //let mut mouse_cursor = Mouse::new(width, height);
     let mut wm = WindowManager::new(width as u32, height as u32);
     wm.add_window(Window::new(100, 100, 400, 300, "Terminal", Rgb888::BLACK));
     wm.add_window(Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE));
 
+    unsafe {
+        if let Some(display) = &mut *ptr {
+            wm.draw_windows(display).ok();
+        }
+    }
+
+    // blog_os::process::sys_yield();
+
+    /*
     loop {
+        println!(" -> DEBUG GUI Loop");
         // 1. Poll mouse (non-blocking – no async needed)
         if let Some(packet) = blog_os::task::mouse::try_get_packet() {
             mouse_cursor.update(&packet);
         }
-
+        
         // 2. Draw frame
         unsafe {
             let ptr = &raw mut GUI_DISPLAY;
             if let Some(display) = &mut *ptr {
-                wm.draw_windows(display).ok();
                 mouse_cursor.draw(display).ok();
             }
         }
@@ -95,6 +103,7 @@ fn process_gui() {
         // 3. Yield so the scheduler can run other processes
         blog_os::process::sys_yield();
     }
+    */
 }
 
 
@@ -121,6 +130,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     );
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
     unsafe { blog_os::vga_buffer::init_vga_offset(phys_mem_offset.as_u64()); }
+
     let mut frame_allocator = unsafe {
         BootInfoFrameAllocator::init(&boot_info.memory_regions)
     };
@@ -153,6 +163,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     // ----------------
 
+    process_gui();
+
     #[cfg(test)]
     test_main();
 
@@ -167,8 +179,8 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     p3.init_stack(process_shell as u64);
 
     // GUI runs kernel code — must use kernel page table (is_user = false)
-    let mut p_gui = process::Process::new(4, "GUI", 65536, false, &mut frame_allocator, phys_mem_offset);
-    p_gui.init_stack(process_gui as u64);
+    //let mut p_gui = process::Process::new(4, "GUI", 65536, false, &mut frame_allocator, phys_mem_offset);
+    //p_gui.init_stack(process_gui as u64);
 
     let mut p_user = process::Process::new(5, "UserApp", 32768, true, &mut frame_allocator, phys_mem_offset);
     let fs = blog_os::fs::TarFileSystem::new(RAM_DISK);
@@ -210,7 +222,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         sched.add_process(p1);
         sched.add_process(p2);
         sched.add_process(p3);
-        sched.add_process(p_gui);
+        //sched.add_process(p_gui);
         sched.add_process(p_user);
     }
 

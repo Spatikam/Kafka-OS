@@ -17,7 +17,6 @@ pub struct Window {
     pub width: u32,
     pub height: u32,
     pub title: String,
-    // Content data could go here, for now just a background color
     pub color: Rgb888,
 }
 

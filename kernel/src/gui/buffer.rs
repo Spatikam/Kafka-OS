@@ -13,10 +13,8 @@ pub struct FrameBufferDisplay {
 }
 
 impl FrameBufferDisplay {
-    /// Creates a new display driver from the bootloader's framebuffer.
     /// Creates a new display driver from the raw framebuffer slice and info.
     pub fn new(buffer: &'static mut [u8], info: FrameBufferInfo) -> Self {
-        
         Self {
             framebuffer: buffer,
             info,
@@ -41,7 +39,7 @@ impl FrameBufferDisplay {
                 }
                 PixelFormat::U8 => {
                     // Grayscale fallback
-                    pixel[0] = (r as u16 + g as u16 + b as u16 / 3) as u8;
+                    pixel[0] = ((r as u16 + g as u16 + b as u16) / 3) as u8;
                 }
                 other => panic!("Unknown pixel format: {:?}", other),
             }

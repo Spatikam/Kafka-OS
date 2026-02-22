@@ -24,8 +24,6 @@ pub mod fs;
 pub mod elf_loader;
 pub mod process;
 pub mod scheduler;
-pub mod vga_graphics;
-pub mod graphics;
 pub mod gui;
 
 pub fn init() {
