@@ -86,12 +86,6 @@ pub fn add_packet_from_interrupt(packet_byte: u8) {
     }
 }
 
-/// Non-blocking: returns a packet if one is queued, otherwise None.
-/// Use this from synchronous (non-async) contexts like the GUI draw loop.
-pub fn try_get_packet() -> Option<MousePacket> {
-    MOUSE_QUEUE.get().and_then(|q| q.pop())
-}
-
 pub struct MouseStream {
     _private: (),
 }
