@@ -45,6 +45,52 @@ impl FrameBufferDisplay {
             }
         }
     }
+    
+    /// Saves a patch of the screen into a byte buffer, clipping at screen edges.
+    pub fn save_patch(&self, x: usize, y: usize, width: usize, height: usize, dest: &mut [u8]) {
+        let bpp = self.info.bytes_per_pixel;
+        let stride = self.info.stride;
+
+        for row in 0..height {
+            let screen_y = y + row;
+            // Clip if it goes off the bottom of the screen
+            if screen_y >= self.info.height { break; } 
+
+            // Shrink the copied width if it goes off the right edge
+            let draw_width = core::cmp::min(width, self.info.width.saturating_sub(x));
+            if draw_width == 0 { continue; }
+
+            let screen_start = (screen_y * stride + x) * bpp;
+            let screen_end = screen_start + (draw_width * bpp);
+
+            let dest_start = row * width * bpp;
+            let dest_end = dest_start + (draw_width * bpp);
+
+            dest[dest_start..dest_end].copy_from_slice(&self.framebuffer[screen_start..screen_end]);
+        }
+    }
+
+    /// Restores a patch of the screen from a byte buffer, clipping at screen edges.
+    pub fn restore_patch(&mut self, x: usize, y: usize, width: usize, height: usize, source: &[u8]) {
+        let bpp = self.info.bytes_per_pixel;
+        let stride = self.info.stride;
+
+        for row in 0..height {
+            let screen_y = y + row;
+            if screen_y >= self.info.height { break; }
+
+            let draw_width = core::cmp::min(width, self.info.width.saturating_sub(x));
+            if draw_width == 0 { continue; }
+
+            let screen_start = (screen_y * stride + x) * bpp;
+            let screen_end = screen_start + (draw_width * bpp);
+
+            let source_start = row * width * bpp;
+            let source_end = source_start + (draw_width * bpp);
+
+            self.framebuffer[screen_start..screen_end].copy_from_slice(&source[source_start..source_end]);
+        }
+    }
 }
 
 impl OriginDimensions for FrameBufferDisplay {
