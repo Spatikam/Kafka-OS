@@ -1,3 +1,3 @@
-pub mod mouse;
+pub mod graphics;
 pub mod window;
 pub mod buffer;
