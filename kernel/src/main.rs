@@ -36,7 +36,7 @@ use embedded_graphics::{
 use blog_os::process;
 
 use blog_os::gui::buffer::FrameBufferDisplay;
-use blog_os::gui::{window::{Window, WindowManager}, graphics::activate_mouse};
+use blog_os::gui::{window::{Window, WindowManager}, graphics::activate_gui};
 
 static RAM_DISK: &[u8] = include_bytes!("../disk.tar");
 
@@ -64,42 +64,6 @@ fn process_b() {
         crate::process::sys_yield();
     }
 }
-
-/*
-fn process_gui() {
-    crate::println!(" -> DEBUG GUI Process Started");
-
-    let ptr = &raw mut GUI_DISPLAY;
-    // Read framebuffer dimensions (already set up by kernel_main)
-    let (width, height) = unsafe {
-        if let Some(display) = &*ptr {
-            (display.size().width as i32, display.size().height as i32)
-        } else {
-            (1080, 720)
-        }
-    };
-
-    //let mut mouse_cursor = Mouse::new(width, height);
-    let mut wm = WindowManager::new(width as u32, height as u32);
-    wm.add_window(Window::new(100, 100, 400, 300, "Terminal", Rgb888::BLACK));
-    wm.add_window(Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE));
-
-    crate::println!("Drawing...");
-    unsafe {
-        if let Some(display) = &mut *ptr {
-            wm.draw_windows(display).ok();
-
-            // Mouse Implementation
-            //mouse_cursor.draw(display);
-        }
-    }
-
-    loop {
-        crate::process::sys_yield();
-    }
-}
-
-*/
 
 fn process_shell() {
     crate::println!("\n -> DEBUG Shell Process Started");
@@ -157,8 +121,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     }
     // ----------------
 
-    //process_gui();
-
     let ptr = &raw mut GUI_DISPLAY;
     let (width, height) = unsafe {
         if let Some(display) = &*ptr {
@@ -167,11 +129,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             (1080, 720)
         }
     };
+    //crate::println!("width:{width}, height: {height}");
     unsafe {
         if let Some(display) = &mut *ptr {
             let mut exec = Executor::new();
             exec.spawn(Task::new(blog_os::cli::run()));
-            exec.spawn(Task::new(activate_mouse(display, width, height)));
+            exec.spawn(Task::new(activate_gui(display, width, height)));
             exec.run();
         }
     }
@@ -188,10 +151,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     p2.init_stack(process_b as u64);
     let mut p3 = process::Process::new(3, "Shell",  32768, false, &mut frame_allocator, phys_mem_offset);
     p3.init_stack(process_shell as u64);
-
-    // GUI runs kernel code — must use kernel page table (is_user = false)
-    //let mut p_gui = process::Process::new(4, "GUI", 65536, false, &mut frame_allocator, phys_mem_offset);
-    //p_gui.init_stack(process_gui as u64);
 
     let mut p_user = process::Process::new(5, "UserApp", 32768, true, &mut frame_allocator, phys_mem_offset);
     let fs = blog_os::fs::TarFileSystem::new(RAM_DISK);
