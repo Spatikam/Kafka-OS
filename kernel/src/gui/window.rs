@@ -32,7 +32,7 @@ impl Window {
             height,
             title: String::from(title),
             color,
-            buffer: alloc::vec![0; (width * height * 4) as usize], // Allocate the exact amount of RAM needed for this specific window
+            buffer: alloc::vec![0; (width * height * 3) as usize], // Allocate the exact amount of RAM needed for this specific window
         }
     }
 
@@ -124,16 +124,16 @@ impl DrawTarget for Window {
                 let x = coord.x as u32;
                 let y = coord.y as u32;
                 
-                // 2. Calculate the flat array index (4 bytes per pixel)
+                // 2. Calculate the flat array index (3 bytes per pixel)
                 // Notice we use self.width, NOT the screen's stride!
-                let index = ((y * self.width + x) * 4) as usize;
+                let index = ((y * self.width + x) * 3) as usize;   // logger says its 3 reverted it to 3.
 
                 // 3. Write the color channels to the Vec buffer safely
-                if index + 3 < self.buffer.len() {
-                    self.buffer[index] = color.r();
+                if index + 2 < self.buffer.len() {
+                    self.buffer[index] = color.b();
                     self.buffer[index + 1] = color.g();
-                    self.buffer[index + 2] = color.b();
-                    self.buffer[index + 3] = 0; // Padding/Alpha byte
+                    self.buffer[index + 2] = color.r();
+                    //self.buffer[index + 3] = 0; // Padding/Alpha byte
                 }
             }
         }
