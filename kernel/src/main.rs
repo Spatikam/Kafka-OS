@@ -36,7 +36,7 @@ use embedded_graphics::{
 use blog_os::process;
 
 use blog_os::gui::buffer::FrameBufferDisplay;
-use blog_os::gui::{window::{Window, WindowManager}, graphics::activate_gui};
+use blog_os::gui::{window::{Window, WindowManager}, graphics::{setup_desktop, activate_mouse, compositor_task}};
 
 static RAM_DISK: &[u8] = include_bytes!("../disk.tar");
 
@@ -46,6 +46,8 @@ static mut GUI_DISPLAY: Option<FrameBufferDisplay> = None;
 const BOOTLOADER_CONFIG: BootloaderConfig = {
     let mut config = BootloaderConfig::new_default();
     config.mappings.physical_memory = Some(Mapping::Dynamic);
+    config.frame_buffer.minimum_framebuffer_height = Some(1080);
+    config.frame_buffer.minimum_framebuffer_width = Some(1920);
     config
 };
 
@@ -132,9 +134,27 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     //crate::println!("width:{width}, height: {height}");
     unsafe {
         if let Some(display) = &mut *ptr {
+            /*activate_gui(display, width, height);
             let mut exec = Executor::new();
+            exec.spawn(Task::new(activate_desktop(display, width, height)));
+            exec.spawn(Task::new(activate_mouse(display, width, height)));*/
+
+            // 1. Prepare the off-screen windows in standard RAM
+            let wm = setup_desktop(width, height);
+
+            // 2. Start the asynchronous task scheduler
+            let mut exec = Executor::new();
+            
             exec.spawn(Task::new(blog_os::cli::run()));
-            exec.spawn(Task::new(activate_gui(display, width, height)));
+
+            // 3. Spawn the mouse input task
+            // Notice it no longer needs `display`! It just talks to the DAMAGE_QUEUE.
+            exec.spawn(Task::new(activate_mouse(width, height)));
+
+            // 4. Spawn the Compositor
+            // It takes exclusive ownership of the physical display and the WindowManager.
+            exec.spawn(Task::new(compositor_task(display, wm)));
+
             exec.run();
         }
     }
