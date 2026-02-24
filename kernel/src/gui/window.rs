@@ -20,11 +20,12 @@ pub struct Window {
     pub height: u32,
     pub title: String,
     pub color: Rgb888,
+    pub bpp: usize,
     pub buffer: Vec<u8>, // The private memory canvas (4 bytes per pixel for ARGB/XRGB)
 }
 
 impl Window {
-    pub fn new(x: i32, y: i32, width: u32, height: u32, title: &str, color: Rgb888) -> Self {
+    pub fn new(x: i32, y: i32, width: u32, height: u32, title: &str, color: Rgb888, bpp: usize) -> Self {
         Self {
             x,
             y,
@@ -32,6 +33,7 @@ impl Window {
             height,
             title: String::from(title),
             color,
+            bpp,
             buffer: alloc::vec![0; (width * height * 3) as usize], // Allocate the exact amount of RAM needed for this specific window
         }
     }
@@ -126,14 +128,14 @@ impl DrawTarget for Window {
                 
                 // 2. Calculate the flat array index (3 bytes per pixel)
                 // Notice we use self.width, NOT the screen's stride!
-                let index = ((y * self.width + x) * 3) as usize;   // logger says its 3 reverted it to 3.
+                let index = ((y * self.width + x) * self.bpp as u32) as usize;   // logger says its 3 reverted it to 3.
 
                 // 3. Write the color channels to the Vec buffer safely
                 if index + 2 < self.buffer.len() {
                     self.buffer[index] = color.b();
                     self.buffer[index + 1] = color.g();
                     self.buffer[index + 2] = color.r();
-                    //self.buffer[index + 3] = 0; // Padding/Alpha byte
+                    self.buffer[index + 3] = 0; // Padding/Alpha byte
                 }
             }
         }

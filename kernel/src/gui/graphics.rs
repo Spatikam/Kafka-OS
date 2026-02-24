@@ -104,18 +104,18 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, wm: WindowManager
     }
 }
 
-pub fn setup_desktop(screen_width: i32, screen_height: i32) -> WindowManager {
+pub fn setup_desktop(screen_width: i32, screen_height: i32, bpp: usize) -> WindowManager {
 
     let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
     
     // 1. Create the Terminal window
-    let mut terminal = Window::new(100, 100, 400, 300, "Terminal", Rgb888::BLACK);
+    let mut terminal = Window::new(100, 100, 400, 300, "Terminal", Rgb888::BLACK, bpp);
     // This draws the title bar and background into the window's private Vec<u8>
     terminal.render_internal_graphics(); 
     wm.add_window(terminal);
 
     // 2. Create the Status window
-    let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE);
+    let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE, bpp);
     status.render_internal_graphics();
     wm.add_window(status);
 
@@ -143,7 +143,7 @@ pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
     MOUSE_Y.store(cursor_y, Ordering::Relaxed);
 
     const SENSITIVITY: i32 = 1;
-    const BPP: usize = 4; // Bytes per pixel of the display
+    //const BPP: usize = 4; // Bytes per pixel of the display
     const CURSOR_WIDTH: usize = 17;
     const CURSOR_HEIGHT: usize = 21;
 

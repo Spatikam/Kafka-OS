@@ -12,7 +12,7 @@ use super::window::Window;
 /// A display driver that wraps the raw framebuffer.
 pub struct FrameBufferDisplay {
     framebuffer: &'static mut [u8],
-    info: FrameBufferInfo,
+    pub info: FrameBufferInfo,
 }
 
 impl FrameBufferDisplay {
@@ -25,7 +25,7 @@ impl FrameBufferDisplay {
     }
 
     /// Clears the screen with a specific color.
-    pub fn clear(&mut self, color: Rgb888) {
+    /*pub fn clear(&mut self, color: Rgb888) {
         for pixel in self.framebuffer.chunks_exact_mut(self.info.bytes_per_pixel) {
             let (r, g, b) = (color.r(), color.g(), color.b());
             
@@ -93,7 +93,7 @@ impl FrameBufferDisplay {
 
             self.framebuffer[screen_start..screen_end].copy_from_slice(&source[source_start..source_end]);
         }
-    }
+    }*/
 
     /// Copies a specific intersecting rectangle from a window's private 
     /// buffer directly to the physical screen.

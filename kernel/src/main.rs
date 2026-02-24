@@ -140,7 +140,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             exec.spawn(Task::new(activate_mouse(display, width, height)));*/
 
             // 1. Prepare the off-screen windows in standard RAM
-            let wm = setup_desktop(width, height);
+            let wm = setup_desktop(width, height, display.info.bytes_per_pixel);
 
             // 2. Start the asynchronous task scheduler
             let mut exec = Executor::new();
