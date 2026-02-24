@@ -135,13 +135,15 @@ impl DrawTarget for Window {
                     self.buffer[index] = color.b();
                     self.buffer[index + 1] = color.g();
                     self.buffer[index + 2] = color.r();
-                    self.buffer[index + 3] = 0; // Padding/Alpha byte
+                    if self.bpp == 4 {
+                        self.buffer[index + 3] = 0; // Padding/Alpha byte
+                    }
                 }
             }
         }
         Ok(())
     }
-}
+} 
 
 pub struct WindowManager {
     pub windows: Vec<Window>,
