@@ -3,7 +3,7 @@ use embedded_graphics::{
     geometry::Point,
     pixelcolor::Rgb888,
     prelude::*,
-    primitives::{PrimitiveStyle, Rectangle},
+    primitives::{Triangle, Rectangle, Circle, PrimitiveStyle, PrimitiveStyleBuilder, Line, Polyline},
 };
 use crate::task::mouse::MousePacket;
 use crate::task::mouse::MouseStream; 
@@ -11,34 +11,206 @@ use futures_util::stream::StreamExt;
 use super::window::{Window, WindowManager};
 use crate::gui::buffer::FrameBufferDisplay;
 
-pub async fn activate_mouse(display: &mut FrameBufferDisplay, screen_width: i32, screen_height: i32) {
-    let mut mouse_stream = MouseStream::new(); 
-    let mut cursor_x: i32 = screen_width/2;
-    let mut cursor_y: i32 = screen_height/2;
-    const SENSITIVITY: i32 = 2;
-    const BPP: usize = 4; // Bytes per pixel of the display
+use spin::Mutex;
+use alloc::vec::Vec;
+
+use crate::gui::geometry::Rect; //geometry module
+
+use core::sync::atomic::{AtomicI32, Ordering};
+use core::future::Future;
+use core::pin::Pin;
+use core::task::{Context, Poll, Waker};
+
+// Global atomic coordinates that the Compositor will read
+pub static MOUSE_X: AtomicI32 = AtomicI32::new(0);
+pub static MOUSE_Y: AtomicI32 = AtomicI32::new(0);
+
+// Assuming DAMAGE_QUEUE is accessible here
+pub static DAMAGE_QUEUE: Mutex<Vec<Rect>> = Mutex::new(Vec::new());
+
+/// Any task can call this when it changes pixels on the screen
+pub fn report_damage(rect: Rect) {
+    DAMAGE_QUEUE.lock().push(rect);
+}
+
+// The global alarm clock for the Compositor
+pub static COMPOSITOR_WAKER: spin::Mutex<Option<Waker>> = spin::Mutex::new(None);
+
+pub struct WaitForDamage;
+
+impl Future for WaitForDamage {
+    type Output = ();
+
+    fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
+        let queue = DAMAGE_QUEUE.lock(); // Adjust crate path as needed
+        
+        if queue.is_empty() {
+            // The queue is empty. Register our alarm clock and go to sleep!
+            *COMPOSITOR_WAKER.lock() = Some(cx.waker().clone());
+            Poll::Pending
+        } else {
+            // There is damage! Wake up immediately.
+            Poll::Ready(())
+        }
+    }
+}
+
+pub async fn compositor_task(display: &mut FrameBufferDisplay, wm: WindowManager) {
+    loop {
+        // 1.
+        WaitForDamage.await;
+
+        // 2. Extract all damage rects and instantly unlock the queue
+        // so other tasks aren't blocked from reporting new damage.
+        let damage_rects: Vec<Rect> = {
+            let mut queue = DAMAGE_QUEUE.lock();
+            let rects = queue.clone();
+            queue.clear();
+            rects
+        };
+
+        // 3. Process every damaged rectangle
+        for damage in damage_rects {
+            
+            // LAYER 1: Erase the damaged area with the desktop background color
+            display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
+
+            // LAYER 2: Draw the Windows
+            for window in &wm.windows {
+                let win_rect = Rect::new(
+                    window.x, window.y, 
+                    window.width as i32, window.height as i32
+                );
+                
+                // MATH CHECK: Does this window touch the damaged area?
+                if let Some(overlap) = damage.intersection(&win_rect) {
+                    // Only draw the specific overlapping patch!
+                    // (We will need to build this blit_partial function)
+                    display.blit_partial(&overlap, window);
+                }
+            }
+
+            // LAYER 3: Draw the Mouse Cursor on top
+            // (Assuming you have global atomic variables for mouse coordinates)
+            let mouse_x = MOUSE_X.load(core::sync::atomic::Ordering::Relaxed) as i32;
+            let mouse_y = MOUSE_Y.load(core::sync::atomic::Ordering::Relaxed) as i32;
+            let mouse_rect = Rect::new(mouse_x, mouse_y, 17, 21); // Your cursor dimensions
+
+            if let Some(_overlap) = damage.intersection(&mouse_rect) {
+                // The mouse is caught in the damage zone, so we must redraw it
+                draw_cursor(display, mouse_x, mouse_y).ok();
+            }
+        }
+    }
+}
+
+pub fn setup_desktop(screen_width: i32, screen_height: i32) -> WindowManager {
 
     let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
+    
+    // 1. Create the Terminal window
+    let mut terminal = Window::new(100, 100, 400, 300, "Terminal", Rgb888::BLACK);
+    // This draws the title bar and background into the window's private Vec<u8>
+    terminal.render_internal_graphics(); 
+    wm.add_window(terminal);
+
+    // 2. Create the Status window
+    let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE);
+    status.render_internal_graphics();
+    wm.add_window(status);
+
+    // 3. Force a full-screen refresh on the very first frame!
+    // This ensures the Compositor paints the desktop background and the initial windows.
+    report_damage(Rect::new(0, 0, screen_width, screen_height));
+
+    // Return the manager so the Compositor can take ownership of it
+    wm
+    /*let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
     wm.add_window(Window::new(100, 100, 400, 300, "Terminal", Rgb888::BLACK));
     wm.add_window(Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE));
-    wm.draw_windows(display).ok();
+    wm.draw_windows(display).ok();*/
+}
 
-    let mut cursor_bg = [[Rgb888::new(0, 128, 128); 10]; 10];
-    let mut saved_bg: [u8; 10 * 10 * BPP] = [0; 10 * 10 * BPP];
 
-    display.save_patch(cursor_x as usize, cursor_y as usize, 10, 10, &mut saved_bg);
+pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
+    let mut mouse_stream = MouseStream::new(); 
+
+    // 1. Initialize Starting Position
+    let mut cursor_x: i32 = screen_width/2;
+    let mut cursor_y: i32 = screen_height/2;
+
+    MOUSE_X.store(cursor_x, Ordering::Relaxed);
+    MOUSE_Y.store(cursor_y, Ordering::Relaxed);
+
+    const SENSITIVITY: i32 = 1;
+    const BPP: usize = 4; // Bytes per pixel of the display
+    const CURSOR_WIDTH: usize = 17;
+    const CURSOR_HEIGHT: usize = 21;
+
+    //let mut cursor_bg = [[Rgb888::new(0, 128, 128); 10]; 10];
+    //let mut saved_bg: [u8; CURSOR_WIDTH * CURSOR_HEIGHT * BPP] = [0; CURSOR_WIDTH * CURSOR_HEIGHT * BPP];
+
+    //display.save_patch(cursor_x as usize, cursor_y as usize, CURSOR_WIDTH, CURSOR_HEIGHT, &mut saved_bg);
+    
+    // 2. Report initial damage so the cursor draws on the very first frame
+    {
+        let mut queue = DAMAGE_QUEUE.lock();
+        queue.push(Rect::new(cursor_x, cursor_y, CURSOR_WIDTH as i32, CURSOR_HEIGHT as i32));
+    }
     
     while let Some(packet) = mouse_stream.next().await {
-        display.restore_patch(cursor_x as usize, cursor_y as usize, 10, 10, &saved_bg);
+        //display.restore_patch(cursor_x as usize, cursor_y as usize, CURSOR_WIDTH, CURSOR_HEIGHT, &saved_bg);
 
-        cursor_x = (cursor_x + ((packet.x as i32) / SENSITIVITY)).clamp(0, screen_width - 10);
-        cursor_y = (cursor_y + ((packet.y as i32) / SENSITIVITY)).clamp(0, screen_height - 10); 
+        // 3. Create a damage box for the OLD position (tells Compositor to erase it)
+        let old_rect = Rect::new(cursor_x, cursor_y, CURSOR_WIDTH as i32, CURSOR_HEIGHT as i32);
 
-        display.save_patch(cursor_x as usize, cursor_y as usize, 10, 10, &mut saved_bg);
+        // 4. Calculate new coordinates
+        cursor_x = (cursor_x + ((packet.x as i32) / SENSITIVITY)).clamp(0, screen_width - CURSOR_WIDTH as i32);
+        cursor_y = (cursor_y + ((packet.y as i32) / SENSITIVITY)).clamp(0, screen_height - CURSOR_HEIGHT as i32); 
+        
+        // 5. Update the global atomic coordinates for the Compositor
+        MOUSE_X.store(cursor_x, Ordering::Relaxed);
+        MOUSE_Y.store(cursor_y, Ordering::Relaxed);
 
-        // Simple 10x10 red square cursor for now
-        Rectangle::new(Point::new(cursor_x, cursor_y),Size::new(10, 10))
-            .into_styled(PrimitiveStyle::with_fill(Rgb888::RED))
-            .draw(display);
+        // 6. Create a damage box for the NEW position (tells Compositor to draw it)
+        let new_rect = Rect::new(cursor_x, cursor_y, CURSOR_WIDTH as i32, CURSOR_HEIGHT as i32);
+
+        // 7. Push both boxes to the damage queue
+        {
+            let mut queue = DAMAGE_QUEUE.lock();
+            queue.push(old_rect);
+            queue.push(new_rect);
+        }
+
+        // 8. Wake up the Compositor!
+        if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
+            waker.wake();
+        }
+
+        //display.save_patch(cursor_x as usize, cursor_y as usize, CURSOR_WIDTH, CURSOR_HEIGHT, &mut saved_bg);
+        //draw_cursor(display, cursor_x, cursor_y).ok();
     }
+}
+
+pub fn draw_cursor<D>(target: &mut D, x: i32, y: i32) -> Result<(), D::Error>
+where
+    D: DrawTarget<Color = Rgb888>,
+{
+    Triangle::new(Point::new(x, y), Point::new(x + 6, y + 12), Point::new(x, y + 20))
+        .into_styled(PrimitiveStyle::with_fill(Rgb888::BLACK))
+        .draw(target)?;
+    Triangle::new(Point::new(x, y), Point::new(x + 6, y + 12), Point::new(x + 16, y + 12))
+        .into_styled(PrimitiveStyle::with_fill(Rgb888::BLACK))
+        .draw(target)?;
+    let points: [Point; 5] = [
+        Point::new(x, y),
+        Point::new(x, y + 20),
+        Point::new(x + 6, y + 12),
+        Point::new(x + 16, y + 12),
+        Point::new(x, y),
+    ];
+    Polyline::new(&points)
+        .into_styled(PrimitiveStyle::with_stroke(Rgb888::WHITE, 1))
+        .draw(target)?;
+    Ok(())
 }

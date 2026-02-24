@@ -4,7 +4,10 @@ use embedded_graphics::{
     geometry::Size,
     pixelcolor::{Rgb888, RgbColor},
     prelude::*,
+    primitives::{PrimitiveStyle, Rectangle},
 };
+use super::geometry::Rect;
+use super::window::Window;
 
 /// A display driver that wraps the raw framebuffer.
 pub struct FrameBufferDisplay {
@@ -90,6 +93,56 @@ impl FrameBufferDisplay {
 
             self.framebuffer[screen_start..screen_end].copy_from_slice(&source[source_start..source_end]);
         }
+    }
+
+    /// Copies a specific intersecting rectangle from a window's private 
+    /// buffer directly to the physical screen.
+    pub fn blit_partial(&mut self, overlap: &Rect, window: &Window) {
+        let bpp = self.info.bytes_per_pixel;
+        let stride = self.info.stride;
+
+        for row_offset in 0..overlap.height {
+            // 1. Calculate the absolute Y coordinate on the physical screen
+            let screen_y = (overlap.y + row_offset) as usize;
+            
+            // 2. Calculate the local Y coordinate inside the window's private buffer
+            // (Where does this overlap start relative to the window's top-left corner?)
+            let win_local_y = ((overlap.y + row_offset) - window.y) as usize;
+
+            // 3. Calculate X coordinates and the total bytes to copy per row
+            let screen_x = overlap.x as usize;
+            let win_local_x = (overlap.x - window.x) as usize;
+            let copy_width_bytes = (overlap.width as usize) * bpp;
+
+            // 4. Calculate starting and ending array indices for the physical screen
+            let screen_start = (screen_y * stride + screen_x) * bpp;
+            let screen_end = screen_start + copy_width_bytes;
+
+            // 5. Calculate starting and ending array indices for the window's buffer
+            // (Windows don't have a stride, they just use their own width)
+            let win_start = (win_local_y * (window.width as usize) + win_local_x) * bpp;
+            let win_end = win_start + copy_width_bytes;
+
+            // 6. Safely copy the slice row-by-row
+            if screen_end <= self.framebuffer.len() && win_end <= window.buffer.len() {
+                self.framebuffer[screen_start..screen_end]
+                    .copy_from_slice(&window.buffer[win_start..win_end]);
+            }
+        }
+    }
+
+    /// A helper function to fill a damaged Rect with a solid background color
+    pub fn fill_rect(&mut self, rect: &Rect, color: embedded_graphics::pixelcolor::Rgb888) {
+        use embedded_graphics::prelude::*;
+        use embedded_graphics::primitives::{Rectangle, PrimitiveStyle};
+        
+        let point = embedded_graphics::geometry::Point::new(rect.x, rect.y);
+        let size = embedded_graphics::geometry::Size::new(rect.width as u32, rect.height as u32);
+        
+        // We can just use embedded-graphics for the solid background fill
+        let _ = Rectangle::new(point, size)
+            .into_styled(PrimitiveStyle::with_fill(color))
+            .draw(self);
     }
 }
 
