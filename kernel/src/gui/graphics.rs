@@ -71,24 +71,64 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, wm: WindowManager
 
         // 3. Process every damaged rectangle
         for damage in damage_rects {
-            
-            // LAYER 1: Erase the damaged area with the desktop background color
-            display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
 
-            // LAYER 2: Draw the Windows
+            // ── FLICKER FIX ─────────────────────────────────────────
+            // Check if the damage rect is fully inside any window.
+            // If so, skip the background fill — the window blit will
+            // fully cover it, so we avoid the teal flash (flicker).
+            let mut fully_covered = false;
+
+            // Check against regular windows (Status, etc.)
+            for window in &wm.windows {
+                let win_rect = Rect::new(
+                    window.x, window.y,
+                    window.width as i32, window.height as i32,
+                );
+                if win_rect.contains_rect(&damage) {
+                    fully_covered = true;
+                    break;
+                }
+            }
+
+            // Check against the Terminal window
+            if !fully_covered {
+                let win_guard = crate::gui::terminal::TERMINAL_WINDOW.lock();
+                if let Some(window) = win_guard.as_ref() {
+                    let win_rect = Rect::new(
+                        window.x, window.y,
+                        window.width as i32, window.height as i32,
+                    );
+                    if win_rect.contains_rect(&damage) {
+                        fully_covered = true;
+                    }
+                }
+            }
+            if !fully_covered {
+                display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
+            }
             for window in &wm.windows {
                 let win_rect = Rect::new(
                     window.x, window.y, 
                     window.width as i32, window.height as i32
                 );
-                
-                // MATH CHECK: Does this window touch the damaged area?
+                // have to eliminate the area so yeah this should do 
                 if let Some(overlap) = damage.intersection(&win_rect) {
-                    // Only draw the specific overlapping patch!
-                    // (We will need to build this blit_partial function)
                     display.blit_partial(&overlap, window);
                 }
             }
+            {
+                let win_guard = crate::gui::terminal::TERMINAL_WINDOW.lock();
+                if let Some(window) = win_guard.as_ref() {
+                    let win_rect = Rect::new(
+                        window.x, window.y,
+                        window.width as i32, window.height as i32
+                    );
+                    if let Some(overlap) = damage.intersection(&win_rect) {
+                        display.blit_partial(&overlap, window);
+                    }
+                }
+            }
+
 
             // LAYER 3: Draw the Mouse Cursor on top
             // (Assuming you have global atomic variables for mouse coordinates)
@@ -107,28 +147,13 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, wm: WindowManager
 pub fn setup_desktop(screen_width: i32, screen_height: i32, bpp: usize) -> WindowManager {
 
     let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
-    
-    // 1. Create the Terminal window
-    let mut terminal = Window::new(100, 100, 400, 300, "Terminal", Rgb888::BLACK, bpp);
-    // This draws the title bar and background into the window's private Vec<u8>
-    terminal.render_internal_graphics(); 
-    wm.add_window(terminal);
-
-    // 2. Create the Status window
+    super::terminal::init_terminal(bpp);
     let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE, bpp);
     status.render_internal_graphics();
     wm.add_window(status);
-
-    // 3. Force a full-screen refresh on the very first frame!
-    // This ensures the Compositor paints the desktop background and the initial windows.
     report_damage(Rect::new(0, 0, screen_width, screen_height));
 
-    // Return the manager so the Compositor can take ownership of it
     wm
-    /*let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
-    wm.add_window(Window::new(100, 100, 400, 300, "Terminal", Rgb888::BLACK));
-    wm.add_window(Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE));
-    wm.draw_windows(display).ok();*/
 }
 
 

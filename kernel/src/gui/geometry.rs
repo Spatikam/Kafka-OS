@@ -10,6 +10,10 @@ impl Rect {
     pub fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
         Self { x, y, width, height }
     }
+    // fix for the tearing when wrting it so yeah 
+    pub fn contains_rect(&self, other: &Rect) -> bool {
+        other.x >= self.x&& other.y >= self.y && (other.x + other.width) <= (self.x + self.width) && (other.y + other.height) <= (self.y + self.height)
+    }
 
     /// Calculates the exact overlapping rectangle between two rects.
     /// Returns None if they do not overlap at all.
