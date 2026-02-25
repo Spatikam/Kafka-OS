@@ -34,7 +34,7 @@ impl Window {
             title: String::from(title),
             color,
             bpp,
-            buffer: alloc::vec![0; (width * height * 3) as usize], // Allocate the exact amount of RAM needed for this specific window
+            buffer: alloc::vec![0; (width * height * bpp as u32) as usize], // Allocate the exact amount of RAM needed for this specific window
         }
     }
 
