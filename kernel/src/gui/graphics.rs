@@ -28,6 +28,9 @@ pub static MOUSE_Y: AtomicI32 = AtomicI32::new(0);
 // Assuming DAMAGE_QUEUE is accessible here
 pub static DAMAGE_QUEUE: Mutex<Vec<Rect>> = Mutex::new(Vec::new());
 
+// We store raw global (x, y) physical screen coordinates here
+pub static CLICK_QUEUE: spin::Mutex<alloc::vec::Vec<(i32, i32)>> = spin::Mutex::new(alloc::vec::Vec::new());
+
 /// Any task can call this when it changes pixels on the screen
 pub fn report_damage(rect: Rect) {
     DAMAGE_QUEUE.lock().push(rect);
@@ -55,10 +58,49 @@ impl Future for WaitForDamage {
     }
 }
 
-pub async fn compositor_task(display: &mut FrameBufferDisplay, wm: WindowManager) {
+pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowManager) {
     loop {
         // 1.
         WaitForDamage.await;
+
+        // 1. Extract raw clicks safely
+        let raw_clicks: Vec<(i32, i32)> = {
+            let mut queue = CLICK_QUEUE.lock();
+            let clicks = queue.clone();
+            queue.clear();
+            clicks
+        };
+
+        // 2. Route the clicks (Hit-Testing)
+        for (click_x, click_y) in raw_clicks {
+            
+            // Iterate in REVERSE Z-order (topmost windows first)
+            for window in wm.windows.iter_mut().rev() {
+                
+                // MATH CHECK: Is the mouse inside this window's bounding box?
+                if click_x >= window.x && click_x < window.x + (window.width as i32) &&
+                   click_y >= window.y && click_y < window.y + (window.height as i32) 
+                {
+                    // Hit! Translate global physical coordinates to local window coordinates
+                    let local_x = click_x - window.x;
+                    let local_y = click_y - window.y;
+                    
+                    // Create the structured event and drop it in the inbox
+                    window.send_event(UIEvent::MouseClick { 
+                        x: local_x, 
+                        y: local_y, 
+                        button: MouseButton::Left 
+                    });
+
+                    // Tell the window to read its mail and execute its functions!
+                    window.process_events();
+                    
+                    // The click was absorbed by this window. 
+                    // Break the loop so windows underneath don't get clicked too!
+                    break; 
+                }
+            }
+        }
 
         // 2. Extract all damage rects and instantly unlock the queue
         // so other tasks aren't blocked from reporting new damage.
@@ -147,10 +189,13 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, wm: WindowManager
 pub fn setup_desktop(screen_width: i32, screen_height: i32, bpp: usize) -> WindowManager {
 
     let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
-    super::terminal::init_terminal(bpp);
+    //super::terminal::init_terminal(bpp);
     let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE, bpp);
     status.render_internal_graphics();
     wm.add_window(status);
+    let mut status2 = Window::new(100, 50, 200, 150, "File", Rgb888::RED, bpp);
+    status2.render_internal_graphics();
+    wm.add_window(status2);
     report_damage(Rect::new(0, 0, screen_width, screen_height));
 
     wm
@@ -172,19 +217,28 @@ pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
     const CURSOR_WIDTH: usize = 17;
     const CURSOR_HEIGHT: usize = 21;
 
-    //let mut cursor_bg = [[Rgb888::new(0, 128, 128); 10]; 10];
-    //let mut saved_bg: [u8; CURSOR_WIDTH * CURSOR_HEIGHT * BPP] = [0; CURSOR_WIDTH * CURSOR_HEIGHT * BPP];
-
-    //display.save_patch(cursor_x as usize, cursor_y as usize, CURSOR_WIDTH, CURSOR_HEIGHT, &mut saved_bg);
-    
     // 2. Report initial damage so the cursor draws on the very first frame
     {
         let mut queue = DAMAGE_QUEUE.lock();
         queue.push(Rect::new(cursor_x, cursor_y, CURSOR_WIDTH as i32, CURSOR_HEIGHT as i32));
     }
     
+    let mut left_button_was_down = false;
+
     while let Some(packet) = mouse_stream.next().await {
-        //display.restore_patch(cursor_x as usize, cursor_y as usize, CURSOR_WIDTH, CURSOR_HEIGHT, &saved_bg);
+        
+        if packet.left_btn && !left_button_was_down {
+            // The user just clicked! Send the global coordinates to the sorter.
+            let mut clicks = CLICK_QUEUE.lock();
+            clicks.push((cursor_x, cursor_y));
+            
+            // Wake up the Compositor to process the click immediately!
+            if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
+                waker.wake();
+            }
+        }
+        
+        left_button_was_down = packet.left_btn;
 
         // 3. Create a damage box for the OLD position (tells Compositor to erase it)
         let old_rect = Rect::new(cursor_x, cursor_y, CURSOR_WIDTH as i32, CURSOR_HEIGHT as i32);
@@ -238,4 +292,29 @@ where
         .into_styled(PrimitiveStyle::with_stroke(Rgb888::WHITE, 1))
         .draw(target)?;
     Ok(())
+}
+
+// --------------------------------------------------------------------------
+// INTERACTIVE MOUSE PIPELINE
+// --------------------------------------------------------------------------
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum MouseButton {
+    Left,
+    Right,
+    Middle,
+}
+
+#[derive(Copy, Clone, Debug)]
+pub enum UIEvent {
+    /// Fired when a mouse button is pressed down
+    MouseClick { x: i32, y: i32, button: MouseButton },
+    
+    /// Fired when a mouse button is released
+    MouseRelease { x: i32, y: i32, button: MouseButton },
+    
+    /// Fired when the mouse enters or moves across the component
+    MouseMove { x: i32, y: i32 },
+    
+    /// (For later) Fired when a key is pressed and this component has focus
+    KeyPress { char: char }, 
 }

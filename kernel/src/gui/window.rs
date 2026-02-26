@@ -11,6 +11,8 @@ use embedded_graphics::{
     text::Text,
 };
 
+use crate::gui::graphics::{UIEvent, MouseButton};
+
 use core::convert::Infallible;
 
 pub struct Window {
@@ -22,6 +24,7 @@ pub struct Window {
     pub color: Rgb888,
     pub bpp: usize,
     pub buffer: Vec<u8>, // The private memory canvas (4 bytes per pixel for ARGB/XRGB)
+    pub event_queue: Vec<UIEvent>, // Event Queue for event handling
 }
 
 impl Window {
@@ -35,36 +38,9 @@ impl Window {
             color,
             bpp,
             buffer: alloc::vec![0; (width * height * bpp as u32) as usize], // Allocate the exact amount of RAM needed for this specific window
+            event_queue: Vec::new(),
         }
     }
-
-    /*pub fn draw<D>(&self, target: &mut D) -> Result<(), D::Error>
-    where
-        D: DrawTarget<Color = Rgb888>,
-    {
-        // Draw Window Body
-        Rectangle::new(Point::new(self.x, self.y), Size::new(self.width, self.height))
-            .into_styled(PrimitiveStyle::with_fill(self.color))
-            .draw(target)?;
-
-        // Draw Title Bar
-        let title_bar_height = 20;
-        Rectangle::new(Point::new(self.x, self.y), Size::new(self.width, title_bar_height))
-            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(50, 50, 50)))
-            .draw(target)?;
-
-        // Draw Title Text
-        let style = MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE);
-        Text::new(&self.title, Point::new(self.x + 5, self.y + 15), style)
-            .draw(target)?;
-
-        // Draw Border
-        Rectangle::new(Point::new(self.x, self.y), Size::new(self.width, self.height))
-            .into_styled(PrimitiveStyle::with_stroke(Rgb888::BLACK, 1))
-            .draw(target)?;
-
-        Ok(())
-    }*/
 
     /// Draws the initial window frame, title bar, and background into RAM
     pub fn render_internal_graphics(&mut self) {
@@ -99,6 +75,26 @@ impl Window {
         super::graphics::report_damage(crate::gui::geometry::Rect::new(
             self.x, self.y, self.width as i32, self.height as i32
         ));
+    }
+
+    pub fn send_event(&mut self, event: UIEvent) {
+        self.event_queue.push(event);
+    }
+
+    pub fn process_events(&mut self) {
+        // Drain clears the inbox so we don't process the same click twice
+        for event in self.event_queue.drain(..) {
+            match event {
+                UIEvent::MouseClick { x, y, button } => {
+                    if button == MouseButton::Left {
+                        crate::println!("Window '{}' clicked at local {}, {}", self.title, x, y);
+                        // Here is where you will eventually check if (x, y) 
+                        // is inside your close button or content area!
+                    }
+                },
+                _ => {} // Ignore other events for now
+            }
+        }
     }
 }
 
