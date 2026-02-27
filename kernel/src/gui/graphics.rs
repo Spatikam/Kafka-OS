@@ -29,7 +29,9 @@ pub static MOUSE_Y: AtomicI32 = AtomicI32::new(0);
 pub static DAMAGE_QUEUE: Mutex<Vec<Rect>> = Mutex::new(Vec::new());
 
 // We store raw global (x, y) physical screen coordinates here
-pub static CLICK_QUEUE: spin::Mutex<alloc::vec::Vec<(i32, i32)>> = spin::Mutex::new(alloc::vec::Vec::new());
+//pub static CLICK_QUEUE: spin::Mutex<alloc::vec::Vec<(i32, i32)>> = spin::Mutex::new(alloc::vec::Vec::new());
+pub static MOUSE_EVENTS: spin::Mutex<alloc::vec::Vec<RawMouse>> = spin::Mutex::new(alloc::vec::Vec::new());
+
 
 /// Any task can call this when it changes pixels on the screen
 pub fn report_damage(rect: Rect) {
@@ -58,46 +60,105 @@ impl Future for WaitForDamage {
     }
 }
 
-pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowManager) {
+pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowManager, screen_width: i32, screen_height: i32) {
     loop {
         // 1.
         WaitForDamage.await;
+        wm.windows.retain(|window| {
+            if window.close_btn {
+                // Before it dies, report its entire physical footprint as damaged!
+                report_damage(Rect::new(
+                    window.x, window.y, 
+                    window.width as i32, window.height as i32
+                ));
+                
+                // Return false to permanently delete it from the Vector and free the RAM
+                false 
+            } else {
+                // Keep the window alive
+                true 
+            }
+        });
 
-        // 1. Extract raw clicks safely
-        let raw_clicks: Vec<(i32, i32)> = {
-            let mut queue = CLICK_QUEUE.lock();
-            let clicks = queue.clone();
+        let raw_events: Vec<RawMouse> = {
+            let mut queue = MOUSE_EVENTS.lock();
+            let evts = queue.clone();
             queue.clear();
-            clicks
+            evts
         };
 
-        // 2. Route the clicks (Hit-Testing)
-        for (click_x, click_y) in raw_clicks {
-            
-            // Iterate in REVERSE Z-order (topmost windows first)
-            for window in wm.windows.iter_mut().rev() {
-                
-                // MATH CHECK: Is the mouse inside this window's bounding box?
-                if click_x >= window.x && click_x < window.x + (window.width as i32) &&
-                   click_y >= window.y && click_y < window.y + (window.height as i32) 
-                {
-                    // Hit! Translate global physical coordinates to local window coordinates
-                    let local_x = click_x - window.x;
-                    let local_y = click_y - window.y;
-                    
-                    // Create the structured event and drop it in the inbox
-                    window.send_event(UIEvent::MouseClick { 
-                        x: local_x, 
-                        y: local_y, 
-                        button: MouseButton::Left 
-                    });
+        // Route Clicks and Releases
+        for event in raw_events {
+            match event {
+                RawMouse::Left (x, y) => {
+                    for window in wm.windows.iter_mut().rev() {
+                        if x >= window.x && x < window.x + (window.width as i32) &&
+                           y >= window.y && y < window.y + (window.height as i32) 
+                        {
+                            window.send_event(UIEvent::MouseClick { 
+                                x: x - window.x, y: y - window.y, 
+                                button: event
+                            });
+                            window.process_events();
+                            break; 
+                        }
+                    }
+                },
+                RawMouse::Left_Released (x, y)  => {
+                    // Tell ALL windows to let go!
+                    for window in &mut wm.windows {
+                        window.is_dragging = false;
+                    }
+                },
+                _ => {} 
+            }
+        }
 
-                    // Tell the window to read its mail and execute its functions!
-                    window.process_events();
-                    
-                    // The click was absorbed by this window. 
-                    // Break the loop so windows underneath don't get clicked too!
-                    break; 
+        // --- THE DRAG ENGINE ---
+        // Grab the live atomic coordinates of the cursor
+        let global_mouse_x = MOUSE_X.load(core::sync::atomic::Ordering::Relaxed) as i32;
+        let global_mouse_y = MOUSE_Y.load(core::sync::atomic::Ordering::Relaxed) as i32;
+
+        for window in &mut wm.windows {
+            if window.is_dragging {
+                // Calculate the new physical position using the local grab offset
+                let new_x = (global_mouse_x - window.drag_x).clamp(0, screen_width - window.width as i32);
+                let new_y = (global_mouse_y - window.drag_y).clamp(0, screen_height - window.height as i32);
+
+                if new_x != window.x || new_y != window.y {
+                    // 1. Report damage for the OLD position (Erases the trail)
+                    if window.x > new_x {  
+                        report_damage(Rect::new(
+                            new_x + window.width as i32, window.y, window.x - new_x, window.height as i32
+                        ));
+                    } else if window.x < new_x {
+                        report_damage(Rect::new(
+                            window.x as i32, window.y, new_x - window.x, window.height as i32
+                        ));
+                    }
+
+                    if window.y > new_y {  
+                        report_damage(Rect::new(
+                            window.x, new_y + window.height as i32, window.width as i32, window.y - new_y
+                        ));
+                    } else if window.y < new_y {
+                        report_damage(Rect::new(
+                            window.x, window.y as i32, window.width as i32, new_y - window.y
+                        ));
+                    }
+
+                    /*report_damage(Rect::new(
+                        window.x, window.y, window.width as i32, window.height as i32
+                    ));*/
+
+                    // 2. Move the window
+                    window.x = new_x;
+                    window.y = new_y;
+
+                    // 3. Report damage for the NEW position (Draws the window)
+                    report_damage(Rect::new(
+                        window.x, window.y, window.width as i32, window.height as i32
+                    ));
                 }
             }
         }
@@ -229,10 +290,19 @@ pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
         
         if packet.left_btn && !left_button_was_down {
             // The user just clicked! Send the global coordinates to the sorter.
-            let mut clicks = CLICK_QUEUE.lock();
-            clicks.push((cursor_x, cursor_y));
+            //let mut clicks = CLICK_QUEUE.lock();
+            //clicks.push((cursor_x, cursor_y));
+            MOUSE_EVENTS.lock().push(RawMouse::Left(cursor_x, cursor_y));
             
             // Wake up the Compositor to process the click immediately!
+            if let Some(waker) = COMPOSITOR_WAKER.lock().take() { waker.wake(); }
+        }
+        else if !packet.left_btn && left_button_was_down {
+            MOUSE_EVENTS.lock().push(RawMouse::Left_Released(cursor_x, cursor_y));
+            if let Some(waker) = COMPOSITOR_WAKER.lock().take() { waker.wake(); }
+        }
+
+        if packet.left_btn && (packet.x != 0 || packet.y != 0) {
             if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
                 waker.wake();
             }
@@ -298,19 +368,22 @@ where
 // INTERACTIVE MOUSE PIPELINE
 // --------------------------------------------------------------------------
 #[derive(Copy, Clone, Debug, PartialEq)]
-pub enum MouseButton {
-    Left,
-    Right,
-    Middle,
+pub enum RawMouse {
+    Left(i32, i32),
+    Left_Released(i32, i32),
+    Right(i32, i32),
+    Right_Released(i32, i32),
+    Middle(i32, i32),
+    Middle_Released(i32, i32),
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum UIEvent {
     /// Fired when a mouse button is pressed down
-    MouseClick { x: i32, y: i32, button: MouseButton },
+    MouseClick { x: i32, y: i32, button: RawMouse },
     
     /// Fired when a mouse button is released
-    MouseRelease { x: i32, y: i32, button: MouseButton },
+    MouseRelease { x: i32, y: i32, button: RawMouse },
     
     /// Fired when the mouse enters or moves across the component
     MouseMove { x: i32, y: i32 },

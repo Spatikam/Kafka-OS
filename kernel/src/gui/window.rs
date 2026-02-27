@@ -11,7 +11,7 @@ use embedded_graphics::{
     text::Text,
 };
 
-use crate::gui::graphics::{UIEvent, MouseButton};
+use crate::gui::graphics::{UIEvent, RawMouse};
 
 use core::convert::Infallible;
 
@@ -25,6 +25,10 @@ pub struct Window {
     pub bpp: usize,
     pub buffer: Vec<u8>, // The private memory canvas (4 bytes per pixel for ARGB/XRGB)
     pub event_queue: Vec<UIEvent>, // Event Queue for event handling
+    pub close_btn: bool, // Close Button Implementation
+    pub is_dragging: bool, // is Window being dragged Windows
+    pub drag_x: i32,
+    pub drag_y: i32,
 }
 
 impl Window {
@@ -39,6 +43,10 @@ impl Window {
             bpp,
             buffer: alloc::vec![0; (width * height * bpp as u32) as usize], // Allocate the exact amount of RAM needed for this specific window
             event_queue: Vec::new(),
+            close_btn: false,
+            is_dragging: false,
+            drag_x: x,
+            drag_y: y,
         }
     }
 
@@ -65,6 +73,12 @@ impl Window {
             .draw(self)
             .unwrap();
 
+        // Drawing the Close Button
+        Rectangle::new(Point::new(self.width as i32 - 20, 0), Size::new(20, 20))
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::RED))
+            .draw(self)
+            .unwrap();
+
         // Draw Border
         Rectangle::new(Point::zero(), Size::new(self.width, self.height))
             .into_styled(PrimitiveStyle::with_stroke(Rgb888::BLACK, 1))
@@ -81,15 +95,24 @@ impl Window {
         self.event_queue.push(event);
     }
 
+    // Processing the Interactive UI Elements of the Window
     pub fn process_events(&mut self) {
         // Drain clears the inbox so we don't process the same click twice
         for event in self.event_queue.drain(..) {
             match event {
                 UIEvent::MouseClick { x, y, button } => {
-                    if button == MouseButton::Left {
-                        crate::println!("Window '{}' clicked at local {}, {}", self.title, x, y);
-                        // Here is where you will eventually check if (x, y) 
-                        // is inside your close button or content area!
+                    match button {
+                        RawMouse::Left (raw_x, raw_y) => {
+                            //crate::println!("Window '{}' clicked at local {}, {}", self.title, x, y);
+                            if self.width as i32 - 20 <= x && x <= self.width as i32 - 2 && 1 <= y && y <= 19 {
+                                self.close_btn = true;
+                            } else if 0 <= x && x <= self.width as i32 - 21 && 0 <= y && y <= 20 {
+                                self.is_dragging = true;
+                                self.drag_x = x;
+                                self.drag_y = y;
+                            }
+                        },
+                        _ => {}
                     }
                 },
                 _ => {} // Ignore other events for now
@@ -159,18 +182,4 @@ impl WindowManager {
     pub fn add_window(&mut self, window: Window) {
         self.windows.push(window);
     }
-
-    /*pub fn draw_windows<D>(&self, target: &mut D) -> Result<(), D::Error>
-    where
-        D: DrawTarget<Color = Rgb888>,
-    {
-        // Draw background
-        target.clear(Rgb888::new(0, 128, 128))?; // Teal desktop
-
-        // Draw all windows
-        for window in &self.windows {
-            window.draw(target)?;
-        }
-        Ok(())
-    }*/
 }

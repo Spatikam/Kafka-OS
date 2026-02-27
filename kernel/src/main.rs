@@ -134,11 +134,6 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     //crate::println!("width:{width}, height: {height}");
     unsafe {
         if let Some(display) = &mut *ptr {
-            /*activate_gui(display, width, height);
-            let mut exec = Executor::new();
-            exec.spawn(Task::new(activate_desktop(display, width, height)));
-            exec.spawn(Task::new(activate_mouse(display, width, height)));*/
-
             // 1. Prepare the off-screen windows in standard RAM
             let wm = setup_desktop(width, height, display.info.bytes_per_pixel);
 
@@ -153,7 +148,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
             // 4. Spawn the Compositor
             // It takes exclusive ownership of the physical display and the WindowManager.
-            exec.spawn(Task::new(compositor_task(display, wm)));
+            exec.spawn(Task::new(compositor_task(display, wm, width, height)));
 
             exec.run();
         }
