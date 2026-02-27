@@ -91,7 +91,8 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
         for event in raw_events {
             match event {
                 RawMouse::Left (x, y) => {
-                    for window in wm.windows.iter_mut().rev() {
+                    let mut clicked_index = None;
+                    for (i, window) in wm.windows.iter_mut().enumerate().rev() {
                         if x >= window.x && x < window.x + (window.width as i32) &&
                            y >= window.y && y < window.y + (window.height as i32) 
                         {
@@ -100,7 +101,25 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                                 button: event
                             });
                             window.process_events();
+                            clicked_index = Some(i);
                             break; 
+                        }
+                    }
+
+                    if let Some(index) = clicked_index {
+                        // Only move it if it isn't ALREADY the top window
+                        if index != wm.windows.len() - 1 {
+                            // Safely extract the window from the vector
+                            let top_window = wm.windows.remove(index);
+                            
+                            // Report damage so the Compositor repaints the overlapping areas
+                            report_damage(Rect::new(
+                                top_window.x, top_window.y, 
+                                top_window.width as i32, top_window.height as i32
+                            ));
+                            
+                            // Push it to the back of the vector (which is the TOP of the screen)
+                            wm.windows.push(top_window);
                         }
                     }
                 },
