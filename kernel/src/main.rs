@@ -134,21 +134,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     //crate::println!("width:{width}, height: {height}");
     unsafe {
         if let Some(display) = &mut *ptr {
-            // 1. Prepare the off-screen windows in standard RAM
+            // Prepare the off-screen windows in standard RAM
             let wm = setup_desktop(width, height, display.info.bytes_per_pixel);
 
-            // 2. Start the asynchronous task scheduler
+            // Start the asynchronous task scheduler
             let mut exec = Executor::new();
             
             exec.spawn(Task::new(blog_os::cli::run()));
 
-            // 3. Spawn the mouse input task
-            // Notice it no longer needs `display`! It just talks to the DAMAGE_QUEUE.
+            // Spawn the mouse input task
             exec.spawn(Task::new(activate_mouse(width, height)));
 
-            // 4. Spawn the Compositor
-            // It takes exclusive ownership of the physical display and the WindowManager.
-            exec.spawn(Task::new(compositor_task(display, wm, width, height)));
+            // Spawn the Taskbar
+            let taskbar = blog_os::gui::taskbar::Taskbar::new(width as u32, display.info.bytes_per_pixel);
+
+            // Spawn the Compositor
+            exec.spawn(Task::new(compositor_task(display, wm, taskbar, width, height)));
 
             exec.run();
         }

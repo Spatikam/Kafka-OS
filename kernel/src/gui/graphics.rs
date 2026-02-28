@@ -10,13 +10,14 @@ use crate::task::mouse::MouseStream;
 use futures_util::stream::StreamExt;
 use super::window::{Window, WindowManager};
 use crate::gui::buffer::FrameBufferDisplay;
+use super::taskbar::Taskbar;
 
 use spin::Mutex;
 use alloc::vec::Vec;
 
 use crate::gui::geometry::Rect; //geometry module
 
-use core::sync::atomic::{AtomicI32, Ordering};
+use core::sync::atomic::{AtomicI32, Ordering, AtomicUsize, AtomicBool};
 use core::future::Future;
 use core::pin::Pin;
 use core::task::{Context, Poll, Waker};
@@ -41,6 +42,12 @@ pub fn report_damage(rect: Rect) {
 // The global alarm clock for the Compositor
 pub static COMPOSITOR_WAKER: spin::Mutex<Option<Waker>> = spin::Mutex::new(None);
 
+// The PIT fires about 18.2 times per second by default on x86
+pub static PIT_TICKS: AtomicUsize = AtomicUsize::new(0);
+
+// A flag to tell the Compositor "A second has passed, update the clock!"
+pub static CLOCK_TICK: AtomicBool = AtomicBool::new(false);
+
 pub struct WaitForDamage;
 
 impl Future for WaitForDamage {
@@ -48,8 +55,9 @@ impl Future for WaitForDamage {
 
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let queue = DAMAGE_QUEUE.lock(); // Adjust crate path as needed
+        let clock_ticked = CLOCK_TICK.load(Ordering::Relaxed);
         
-        if queue.is_empty() {
+        if queue.is_empty() && !clock_ticked {
             // The queue is empty. Register our alarm clock and go to sleep!
             *COMPOSITOR_WAKER.lock() = Some(cx.waker().clone());
             Poll::Pending
@@ -60,10 +68,16 @@ impl Future for WaitForDamage {
     }
 }
 
-pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowManager, screen_width: i32, screen_height: i32) {
+pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowManager, mut taskbar: Taskbar, screen_width: i32, screen_height: i32) {
     loop {
         // 1.
         WaitForDamage.await;
+        if CLOCK_TICK.swap(false, Ordering::Relaxed) {
+            // This recalculates the RTC time and automatically pushes 
+            // the new graphic to the DAMAGE_QUEUE!
+            taskbar.tick();
+        }
+
         wm.windows.retain(|window| {
             if window.close_btn {
                 // Before it dies, report its entire physical footprint as damaged!
@@ -91,6 +105,15 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
         for event in raw_events {
             match event {
                 RawMouse::Left (x, y) => {
+                    if y < taskbar.height as i32 {
+                        // The click belongs to the taskbar!
+                        taskbar.send_event(UIEvent::MouseClick { 
+                            x, y, button: event // Local X and Y are identical to global here
+                        });
+                        // taskbar.process_events(); // We will build this next!
+                        continue; // Skip the windows below!
+                    }
+
                     let mut clicked_index = None;
                     for (i, window) in wm.windows.iter_mut().enumerate().rev() {
                         if x >= window.x && x < window.x + (window.width as i32) &&
@@ -142,7 +165,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             if window.is_dragging {
                 // Calculate the new physical position using the local grab offset
                 let new_x = (global_mouse_x - window.drag_x).clamp(0, screen_width - window.width as i32);
-                let new_y = (global_mouse_y - window.drag_y).clamp(0, screen_height - window.height as i32);
+                let new_y = (global_mouse_y - window.drag_y).clamp(30, screen_height - window.height as i32);
 
                 if new_x != window.x || new_y != window.y {
                     // 1. Report damage for the OLD position (Erases the trail)
@@ -200,15 +223,20 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             // fully cover it, so we avoid the teal flash (flicker).
             let mut fully_covered = false;
 
-            // Check against regular windows (Status, etc.)
-            for window in &wm.windows {
-                let win_rect = Rect::new(
-                    window.x, window.y,
-                    window.width as i32, window.height as i32,
-                );
-                if win_rect.contains_rect(&damage) {
-                    fully_covered = true;
-                    break;
+            let task_rect = Rect::new(0, 0, screen_width, 30);
+            if task_rect.contains_rect(&damage) {
+                fully_covered = true;
+            } else {
+                // Check against regular windows (Status, etc.)
+                for window in &wm.windows {
+                    let win_rect = Rect::new(
+                        window.x, window.y,
+                        window.width as i32, window.height as i32,
+                    );
+                    if win_rect.contains_rect(&damage) {
+                        fully_covered = true;
+                        break;
+                    }
                 }
             }
 
@@ -235,7 +263,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 );
                 // have to eliminate the area so yeah this should do 
                 if let Some(overlap) = damage.intersection(&win_rect) {
-                    display.blit_partial(&overlap, window);
+                    display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
                 }
             }
             {
@@ -246,11 +274,16 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         window.width as i32, window.height as i32
                     );
                     if let Some(overlap) = damage.intersection(&win_rect) {
-                        display.blit_partial(&overlap, window);
+                        display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
                     }
                 }
             }
 
+            // Draw the Taskbar over everything else
+            let taskbar_rect = Rect::new(0, 0, taskbar.width as i32, taskbar.height as i32);
+            if let Some(overlap) = damage.intersection(&taskbar_rect) {
+                display.blit_partial(&overlap, &taskbar.buffer, taskbar.width, 0, 0);
+            }
 
             // LAYER 3: Draw the Mouse Cursor on top
             // (Assuming you have global atomic variables for mouse coordinates)
