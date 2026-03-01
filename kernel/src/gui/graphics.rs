@@ -10,7 +10,7 @@ use crate::task::mouse::MouseStream;
 use futures_util::stream::StreamExt;
 use super::window::{Window, WindowManager};
 use crate::gui::buffer::FrameBufferDisplay;
-use super::taskbar::Taskbar;
+use super::taskbar::{Taskbar, TaskbarAction};
 
 use spin::Mutex;
 use alloc::vec::Vec;
@@ -111,17 +111,43 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                             x, y, button: event // Local X and Y are identical to global here
                         });
                         // Check if the Taskbar wants us to open a menu!
-                        if let super::taskbar::TaskbarAction::OpenPowerMenu = taskbar.process_events() {
+                        /*if let super::taskbar::TaskbarAction::OpenPowerMenu = taskbar.process_events() {
                             // Create a small 120x100 window right below the power button
                             let mut power_menu = Window::new(
                                 (taskbar.width - 120) as i32, taskbar.height as i32, 
                                 120, 100, 
-                                "Power", Rgb888::new(40, 40, 40), taskbar.bpp
+                                "Power Menu", Rgb888::new(40, 40, 40), taskbar.bpp
                             );
                             
                             // We will build this custom render function next!
                             power_menu.render_power_menu(); 
                             wm.add_window(power_menu);
+                        }*/
+                        match taskbar.process_events() {
+                            TaskbarAction::OpenPowerMenu => {
+                                // Create a small 120x100 window right below the power button
+                                let mut power_menu = Window::new(
+                                    (taskbar.width - 120) as i32, taskbar.height as i32, 
+                                    120, 100, 
+                                    "Power Menu", Rgb888::new(40, 40, 40), taskbar.bpp
+                                );
+                                
+                                // We will build this custom render function next!
+                                power_menu.render_power_menu(); 
+                                wm.add_window(power_menu);
+                            },
+                            TaskbarAction::OpenAppMenu => {
+                                // Create a 150x120 window anchored to the left
+                                let mut app_menu = Window::new(
+                                    0, taskbar.height as i32, 
+                                    150, 120, 
+                                    "Apps", Rgb888::new(40, 40, 40), taskbar.bpp
+                                );
+                                
+                                app_menu.render_app_menu(); 
+                                wm.add_window(app_menu);
+                            },
+                            TaskbarAction::None => {}
                         }
                         continue; // Skip the windows below!
                     }

@@ -27,6 +27,7 @@ pub struct Taskbar {
 pub enum TaskbarAction {
     None,
     OpenPowerMenu,
+    OpenAppMenu,
 }
 
 impl Taskbar {
@@ -70,8 +71,11 @@ impl Taskbar {
                     
                     // MATH CHECK: Did they click the right-side Power Button?
                     if x >= (self.width as i32 - 25) {
-                        crate::println!("Taskbar: Power Button Clicked!");
+                        //crate::println!("Taskbar: Power Button Clicked!");
                         action = TaskbarAction::OpenPowerMenu;
+                    } else if x <= 80 { 
+                        //crate::println!("Taskbar: App Menu Clicked!");
+                        action = TaskbarAction::OpenAppMenu;
                     }
                 }
             }

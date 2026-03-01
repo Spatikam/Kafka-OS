@@ -105,18 +105,34 @@ impl Window {
                     match button {
                         RawMouse::Left (raw_x, raw_y) => {
                             //crate::println!("Window '{}' clicked at local {}, {}", self.title, x, y);
-                            // --- THE POWER MENU HIT-TESTING ---
-                            if self.title == "Power" {
+                            
+                            if self.title == "Power Menu" {
                                 // Did they click inside the content area (below the title bar)?
                                 if y > 20 {
                                     if y >= 25 && y < 50 {
                                         crate::println!("Sleep selected");
-                                        // self.should_close = true; // Close the menu when clicked
+                                        self.close_btn = true; // Auto-close the menu
                                     } else if y >= 50 && y < 75 {
                                         crate::println!("Restart selected");
+                                        self.close_btn = true;
                                     } else if y >= 75 && y <= 100 {
                                         crate::println!("Shutdown selected! Goodbye.");
+                                        self.close_btn = true;
                                         exit_qemu(QemuExitCode::Success);
+                                    }
+                                }
+                            }
+                            if self.title == "Apps" {
+                                if y > 20 {
+                                    if y >= 25 && y < 50 {
+                                        crate::println!("Launching Terminal...");
+                                        self.close_btn = true; // Auto-close the menu
+                                    } else if y >= 50 && y < 75 {
+                                        crate::println!("Launching Files...");
+                                        self.close_btn = true;
+                                    } else if y >= 75 && y <= 100 {
+                                        crate::println!("Launching Settings...");
+                                        self.close_btn = true;
                                     }
                                 }
                             }
@@ -152,6 +168,18 @@ impl Window {
         
         // Note: render_internal_graphics already reported the damage, 
         // so the screen will perfectly update when this spawns.
+    }
+
+    pub fn render_app_menu(&mut self) {
+        // 1. Draw standard background/borders
+        self.render_internal_graphics();
+
+        // 2. Draw 3 Placeholder Apps
+        let style = MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE);
+        
+        Text::new("Terminal", Point::new(10, 40), style).draw(self).unwrap();
+        Text::new("Files", Point::new(10, 65), style).draw(self).unwrap();
+        Text::new("Settings", Point::new(10, 90), style).draw(self).unwrap();
     }
 }
 
