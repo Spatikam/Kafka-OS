@@ -6,14 +6,14 @@ use embedded_graphics::{
     mono_font::{ascii::FONT_8X13, MonoTextStyle},
     pixelcolor::Rgb888,
     prelude::*,
-    primitives::{PrimitiveStyle, Rectangle},
+    primitives::{PrimitiveStyle, Rectangle, Arc, Line},
     text::Text,
 };
 use core::convert::Infallible;
 use crate::gui::graphics::UIEvent; // Adjust imports as needed
 use alloc::format;
 use crate::gui::rtc::{RTC,DateTime};
-
+use super::graphics::RawMouse;
 
 pub struct Taskbar {
     pub width: u32,
@@ -22,6 +22,11 @@ pub struct Taskbar {
     pub buffer: Vec<u8>,
     pub event_queue: Vec<UIEvent>,
     pub last_minute: u8, // NEW: Remember the last drawn minute
+}
+
+pub enum TaskbarAction {
+    None,
+    OpenPowerMenu,
 }
 
 impl Taskbar {
@@ -53,6 +58,26 @@ impl Taskbar {
             self.last_minute = time.minute;
             self.render_internal_graphics(&time); 
         }
+    }
+
+    /// Reads the Taskbar's inbox and returns an action for the Compositor
+    pub fn process_events(&mut self) -> TaskbarAction {
+        let mut action = TaskbarAction::None;
+        
+        for event in self.event_queue.drain(..) {
+            if let UIEvent::MouseClick { x, y, button } = event {
+                if let RawMouse::Left(..) = button {
+                    
+                    // MATH CHECK: Did they click the right-side Power Button?
+                    if x >= (self.width as i32 - 25) {
+                        crate::println!("Taskbar: Power Button Clicked!");
+                        action = TaskbarAction::OpenPowerMenu;
+                    }
+                }
+            }
+        }
+        
+        action
     }
 }
 
@@ -96,9 +121,13 @@ impl Taskbar {
         let weekday = get_weekday(time.year, time.month, time.day);
         let month_str = get_month_name(time.month);
         
-        let display_str = format!(
-            "{}, {:02} {} {} {:02}:{:02}", 
-            weekday, time.day, month_str, time.year, time.hour, time.minute
+        let date_str = format!(
+            "{}, {:02} {} {}", 
+            weekday, time.day, month_str, time.year
+        );
+        let time_str = format!(
+            "{:02}:{:02}", 
+            time.hour, time.minute
         );
 
         // 1. Base Background (Dark Gray)
@@ -113,18 +142,22 @@ impl Taskbar {
             .draw(self).unwrap();
 
         // 3. Time & Date (Center)
-        let text_width = display_str.len() as u32 * 8;
-        let center_x = (self.width / 2) - (text_width / 2);
-        Text::new(&display_str, Point::new(center_x as i32, 20), text_style)
+        //let text_width = date_str.len() as u32 * 8;
+        let center_x = (self.width / 2) - ((date_str.len() as u32 * 8) / 2);
+        Text::new(&date_str, Point::new(center_x as i32, 12), text_style)
+            .draw(self).unwrap();
+        //let text_width = time_str.len() as u32 * 8;
+        let center_x = (self.width / 2) - ((time_str.len() as u32 * 8) / 2);
+        Text::new(&time_str, Point::new(center_x as i32, 27), text_style)
             .draw(self).unwrap();
 
-        // 4. Power Button (Right)
-        let power_btn_x = (self.width - 70) as i32;
-        Rectangle::new(Point::new(power_btn_x, 0), Size::new(70, 30))
-            .into_styled(PrimitiveStyle::with_fill(Rgb888::RED))
+        //let power_btn_x = (self.width - 70) as i32;
+        Line::new(Point::new(self.width as i32 - 15, 3), Point::new(self.width as i32 - 15, 15))
+            .into_styled(PrimitiveStyle::with_stroke(Rgb888::RED, 3))
             .draw(self).unwrap();
-            
-        Text::new("Power", Point::new(power_btn_x + 15, 20), text_style)
+
+        Arc::new(Point::new(self.width as i32 - 25, 7), 20, -60.0.deg(), 300.0.deg())
+            .into_styled(PrimitiveStyle::with_stroke(Rgb888::RED, 3))
             .draw(self).unwrap();
 
         // Report damage to the Compositor

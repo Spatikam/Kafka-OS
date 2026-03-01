@@ -110,7 +110,19 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         taskbar.send_event(UIEvent::MouseClick { 
                             x, y, button: event // Local X and Y are identical to global here
                         });
-                        // taskbar.process_events(); // We will build this next!
+                        // Check if the Taskbar wants us to open a menu!
+                        if let super::taskbar::TaskbarAction::OpenPowerMenu = taskbar.process_events() {
+                            // Create a small 120x100 window right below the power button
+                            let mut power_menu = Window::new(
+                                (taskbar.width - 120) as i32, taskbar.height as i32, 
+                                120, 100, 
+                                "Power", Rgb888::new(40, 40, 40), taskbar.bpp
+                            );
+                            
+                            // We will build this custom render function next!
+                            power_menu.render_power_menu(); 
+                            wm.add_window(power_menu);
+                        }
                         continue; // Skip the windows below!
                     }
 

@@ -12,6 +12,7 @@ use embedded_graphics::{
 };
 
 use crate::gui::graphics::{UIEvent, RawMouse};
+use crate::{exit_qemu,QemuExitCode};
 
 use core::convert::Infallible;
 
@@ -104,6 +105,21 @@ impl Window {
                     match button {
                         RawMouse::Left (raw_x, raw_y) => {
                             //crate::println!("Window '{}' clicked at local {}, {}", self.title, x, y);
+                            // --- THE POWER MENU HIT-TESTING ---
+                            if self.title == "Power" {
+                                // Did they click inside the content area (below the title bar)?
+                                if y > 20 {
+                                    if y >= 25 && y < 50 {
+                                        crate::println!("Sleep selected");
+                                        // self.should_close = true; // Close the menu when clicked
+                                    } else if y >= 50 && y < 75 {
+                                        crate::println!("Restart selected");
+                                    } else if y >= 75 && y <= 100 {
+                                        crate::println!("Shutdown selected! Goodbye.");
+                                        exit_qemu(QemuExitCode::Success);
+                                    }
+                                }
+                            }
                             if self.width as i32 - 20 <= x && x <= self.width as i32 - 2 && 1 <= y && y <= 19 {
                                 self.close_btn = true;
                             } else if 0 <= x && x <= self.width as i32 - 21 && 0 <= y && y <= 20 {
@@ -118,6 +134,24 @@ impl Window {
                 _ => {} // Ignore other events for now
             }
         }
+    }
+
+    pub fn render_power_menu(&mut self) {
+        // 1. Draw the standard background and border
+        self.render_internal_graphics();
+
+        // 2. Draw the 3 Menu Options
+        let style = MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE);
+        
+        // Sleep (y = 40)
+        Text::new("Sleep", Point::new(10, 40), style).draw(self).unwrap();
+        // Restart (y = 65)
+        Text::new("Restart", Point::new(10, 65), style).draw(self).unwrap();
+        // Shutdown (y = 90)
+        Text::new("Shutdown", Point::new(10, 90), style).draw(self).unwrap();
+        
+        // Note: render_internal_graphics already reported the damage, 
+        // so the screen will perfectly update when this spawns.
     }
 }
 
