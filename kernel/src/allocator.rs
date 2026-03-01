@@ -10,7 +10,7 @@ pub mod fixed_size_block;
 pub mod linked_list;
 
 pub const HEAP_START: usize = 0x_4444_4444_0000;
-pub const HEAP_SIZE: usize = 1024 * 1024; // 1 MiB
+pub const HEAP_SIZE: usize = 16 *1024 * 1024; // changed to 16 MB , heap size too small !! .
 
 #[global_allocator]
 static ALLOCATOR: Locked<FixedSizeBlockAllocator> = Locked::new(FixedSizeBlockAllocator::new());

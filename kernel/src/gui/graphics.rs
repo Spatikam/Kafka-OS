@@ -103,6 +103,17 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, wm: WindowManager
                     }
                 }
             }
+            if !fully_covered{
+                let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
+                if let Some(window) = win_guard.as_ref(){
+                    let win_rect = Rect::new(
+                        window.x,window.y, window.width as i32, window.height as i32,
+                    );
+                    if win_rect.contains_rect(&damage){
+                        fully_covered = true;
+                    }
+                }
+            }
             if !fully_covered {
                 display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
             }
@@ -121,7 +132,39 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, wm: WindowManager
                 if let Some(window) = win_guard.as_ref() {
                     let win_rect = Rect::new(
                         window.x, window.y,
-                        window.width as i32, window.height as i32
+                        window.width as i32, window.height as i32,
+                    );
+                    if let Some(overlap) = damage.intersection(&win_rect) {
+                        // Subtract the notepad area — only blit visible parts
+                        if crate::gui::notepad::is_active() {
+                            let np_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
+                            let visible_parts = if let Some(np) = np_guard.as_ref() {
+                                let np_rect = Rect::new(
+                                    np.x, np.y,
+                                    np.width as i32, np.height as i32,
+                                );
+                                overlap.subtract(&np_rect)
+                            } else {
+                                alloc::vec![overlap]
+                            };
+                            drop(np_guard);
+                            for part in visible_parts {
+                                display.blit_partial(&part, window);
+                            }
+                        } else {
+                            display.blit_partial(&overlap, window);
+                        }
+                    }
+                }
+            }
+            // Notepad window (on top of terminal)  this is just for now
+            // I guess we have to change this when we bring the dynammic window sizing.
+            {
+                let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
+                if let Some(window) = win_guard.as_ref() {
+                    let win_rect = Rect::new(
+                        window.x, window.y,
+                        window.width as i32, window.height as i32,
                     );
                     if let Some(overlap) = damage.intersection(&win_rect) {
                         display.blit_partial(&overlap, window);
