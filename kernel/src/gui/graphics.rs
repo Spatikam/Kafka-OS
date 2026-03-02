@@ -8,7 +8,7 @@ use embedded_graphics::{
 use crate::task::mouse::MousePacket;
 use crate::task::mouse::MouseStream; 
 use futures_util::stream::StreamExt;
-use super::window::{Window, WindowManager};
+use super::window::{Window, WindowManager, AppState};
 use crate::gui::buffer::FrameBufferDisplay;
 use super::taskbar::{Taskbar, TaskbarAction};
 
@@ -117,12 +117,19 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             match req {
                 AppRequest::Files => {
                     // Spawn a 400x300 window in the center of the screen
-                    let mut file_win = Window::new(
+                    let mut file_win = Window::with_state(
                         100, 100, 400, 300, 
-                        "Files", Rgb888::WHITE, taskbar.bpp
+                        "Files", Rgb888::WHITE, taskbar.bpp,
+                        AppState::FileExplorer {
+                            current_path: alloc::string::String::new(),
+                            displayed_entries: alloc::vec::Vec::new(),
+                        }
                     );
                     file_win.render_file_explorer(); 
                     wm.add_window(file_win);
+                },
+                AppRequest::Terminal => {
+                    super::terminal::init_terminal(taskbar.bpp);
                 },
                 _ => {} // Handle Terminal and Settings later
             }
@@ -144,26 +151,13 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         taskbar.send_event(UIEvent::MouseClick { 
                             x, y, button: event // Local X and Y are identical to global here
                         });
-                        // Check if the Taskbar wants us to open a menu!
-                        /*if let super::taskbar::TaskbarAction::OpenPowerMenu = taskbar.process_events() {
-                            // Create a small 120x100 window right below the power button
-                            let mut power_menu = Window::new(
-                                (taskbar.width - 120) as i32, taskbar.height as i32, 
-                                120, 100, 
-                                "Power Menu", Rgb888::new(40, 40, 40), taskbar.bpp
-                            );
-                            
-                            // We will build this custom render function next!
-                            power_menu.render_power_menu(); 
-                            wm.add_window(power_menu);
-                        }*/
+
                         match taskbar.process_events() {
                             TaskbarAction::OpenPowerMenu => {
                                 // Create a small 120x100 window right below the power button
                                 let mut power_menu = Window::new(
-                                    (taskbar.width - 120) as i32, taskbar.height as i32, 
-                                    120, 100, 
-                                    "Power Menu", Rgb888::new(40, 40, 40), taskbar.bpp
+                                    (taskbar.width - 120) as i32, taskbar.height as i32, 120, 100, 
+                                    "Power Menu", Rgb888::new(40, 40, 40), taskbar.bpp, 
                                 );
                                 
                                 // We will build this custom render function next!
@@ -175,7 +169,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                                 let mut app_menu = Window::new(
                                     0, taskbar.height as i32, 
                                     150, 120, 
-                                    "Apps", Rgb888::new(40, 40, 40), taskbar.bpp
+                                    "App Menu", Rgb888::new(40, 40, 40), taskbar.bpp
                                 );
                                 
                                 app_menu.render_app_menu(); 
@@ -378,7 +372,7 @@ pub fn setup_desktop(screen_width: i32, screen_height: i32, bpp: usize) -> Windo
     //let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE, bpp);
     //status.render_internal_graphics();
     //wm.add_window(status);
-    l//et mut status2 = Window::new(100, 50, 200, 150, "File", Rgb888::RED, bpp);
+    //let mut status2 = Window::new(100, 50, 200, 150, "File", Rgb888::RED, bpp);
     //status2.render_internal_graphics();
     //wm.add_window(status2);
     report_damage(Rect::new(0, 0, screen_width, screen_height));
