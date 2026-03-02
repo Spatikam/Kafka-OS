@@ -11,7 +11,7 @@ use embedded_graphics::{
     text::Text,
 };
 
-use crate::gui::graphics::{UIEvent, RawMouse};
+use crate::gui::graphics::{UIEvent, RawMouse, APP_REQUESTS};
 use crate::{exit_qemu,QemuExitCode};
 
 use core::convert::Infallible;
@@ -36,7 +36,7 @@ impl Window {
     pub fn new(x: i32, y: i32, width: u32, height: u32, title: &str, color: Rgb888, bpp: usize) -> Self {
         Self {
             x,
-            y,
+            y, //cmp::min(30, y),
             width,
             height,
             title: String::from(title),
@@ -129,6 +129,7 @@ impl Window {
                                         self.close_btn = true; // Auto-close the menu
                                     } else if y >= 50 && y < 75 {
                                         crate::println!("Launching Files...");
+                                        APP_REQUESTS.lock().push(crate::gui::graphics::AppRequest::Files);
                                         self.close_btn = true;
                                     } else if y >= 75 && y <= 100 {
                                         crate::println!("Launching Settings...");
@@ -152,6 +153,7 @@ impl Window {
         }
     }
 
+    // Power Menu
     pub fn render_power_menu(&mut self) {
         // 1. Draw the standard background and border
         self.render_internal_graphics();
@@ -170,6 +172,7 @@ impl Window {
         // so the screen will perfectly update when this spawns.
     }
 
+    // Applications Menu
     pub fn render_app_menu(&mut self) {
         // 1. Draw standard background/borders
         self.render_internal_graphics();
@@ -180,6 +183,47 @@ impl Window {
         Text::new("Terminal", Point::new(10, 40), style).draw(self).unwrap();
         Text::new("Files", Point::new(10, 65), style).draw(self).unwrap();
         Text::new("Settings", Point::new(10, 90), style).draw(self).unwrap();
+    }
+
+    // File Explorer
+    pub fn render_file_explorer(&mut self) {
+        // 1. Draw the standard white background and title bar
+        self.render_internal_graphics();
+
+        // 2. We want black text because the background is white
+        let text_style = MonoTextStyle::new(&FONT_8X13, Rgb888::BLACK);
+        
+        // Draw Table Headers
+        Text::new("Name", Point::new(30, 40), text_style).draw(self).unwrap();
+        Text::new("----", Point::new(30, 50), text_style).draw(self).unwrap();
+
+        // 3. Fetch the files from your OverlayFS!
+        if let Some(fs_mutex) = crate::fs::FILESYSTEM.get() {
+            let fs = fs_mutex.lock();
+            let files = fs.list_files();
+            
+            let mut y_offset = 65;
+            for file_name in files {
+                // Draw a little blue square to act as a "File Icon"
+                Rectangle::new(Point::new(10, y_offset - 10), Size::new(10, 10))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb888::BLUE))
+                    .draw(self).unwrap();
+
+                // Draw the actual file name from your TAR/RAM filesystem
+                Text::new(&file_name, Point::new(30, y_offset), text_style).draw(self).unwrap();
+                
+                // Move down 20 pixels for the next file
+                y_offset += 20;
+            }
+        } else {
+            // Failsafe in case the window opens before the FS mounts
+            Text::new("File System Not Initialized", Point::new(30, 65), text_style).draw(self).unwrap();
+        }
+
+        // 4. Report the damage
+        crate::gui::graphics::report_damage(crate::gui::geometry::Rect::new(
+            self.x, self.y, self.width as i32, self.height as i32
+        ));
     }
 }
 

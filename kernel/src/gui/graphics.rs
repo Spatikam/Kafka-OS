@@ -48,6 +48,16 @@ pub static PIT_TICKS: AtomicUsize = AtomicUsize::new(0);
 // A flag to tell the Compositor "A second has passed, update the clock!"
 pub static CLOCK_TICK: AtomicBool = AtomicBool::new(false);
 
+// For Opening Apps and Using them
+#[derive(Clone, Copy)]
+pub enum AppRequest {
+    Files,
+    Terminal,
+    Settings,
+}
+
+pub static APP_REQUESTS: spin::Mutex<alloc::vec::Vec<AppRequest>> = spin::Mutex::new(alloc::vec::Vec::new());
+
 pub struct WaitForDamage;
 
 impl Future for WaitForDamage {
@@ -78,6 +88,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             taskbar.tick();
         }
 
+        // Removes closed Windows from display
         wm.windows.retain(|window| {
             if window.close_btn {
                 // Before it dies, report its entire physical footprint as damaged!
@@ -93,6 +104,29 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 true 
             }
         });
+
+        // --- APP LAUNCH PHASE ---
+        let requests: Vec<AppRequest> = {
+            let mut q = APP_REQUESTS.lock();
+            let reqs = q.clone();
+            q.clear();
+            reqs
+        };
+
+        for req in requests {
+            match req {
+                AppRequest::Files => {
+                    // Spawn a 400x300 window in the center of the screen
+                    let mut file_win = Window::new(
+                        100, 100, 400, 300, 
+                        "Files", Rgb888::WHITE, taskbar.bpp
+                    );
+                    file_win.render_file_explorer(); 
+                    wm.add_window(file_win);
+                },
+                _ => {} // Handle Terminal and Settings later
+            }
+        }
 
         let raw_events: Vec<RawMouse> = {
             let mut queue = MOUSE_EVENTS.lock();
@@ -341,12 +375,12 @@ pub fn setup_desktop(screen_width: i32, screen_height: i32, bpp: usize) -> Windo
 
     let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
     //super::terminal::init_terminal(bpp);
-    let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE, bpp);
-    status.render_internal_graphics();
-    wm.add_window(status);
-    let mut status2 = Window::new(100, 50, 200, 150, "File", Rgb888::RED, bpp);
-    status2.render_internal_graphics();
-    wm.add_window(status2);
+    //let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE, bpp);
+    //status.render_internal_graphics();
+    //wm.add_window(status);
+    l//et mut status2 = Window::new(100, 50, 200, 150, "File", Rgb888::RED, bpp);
+    //status2.render_internal_graphics();
+    //wm.add_window(status2);
     report_damage(Rect::new(0, 0, screen_width, screen_height));
 
     wm
