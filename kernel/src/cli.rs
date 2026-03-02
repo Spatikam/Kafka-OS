@@ -22,12 +22,14 @@ pub async fn run() {
     let mut input_buffer = String::new();
     let mut history: Vec<String> = Vec::new();
     let mut history_index: usize = 0;
-
+    let mut cwd = String::from("/");
     // we need to track these ourselves for notepad shortcuts, would help use to trigger some func.
     let mut ctrl_pressed = false;
     let mut shift_pressed = false;
 
-    print_prompt();
+    //print_prompt();
+
+    print_prompt(&cwd);
 
     while let Some(scancode) = scancodes.next().await {
         if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
@@ -78,7 +80,7 @@ pub async fn run() {
                     DecodedKey::Unicode(character) => match character {
                         '\n' => {
                             tprintln!();
-                            execute_command(&input_buffer);
+                            execute_command(&input_buffer, &mut cwd);
 
                             if !input_buffer.is_empty() {
                                 history.push(input_buffer.clone());
@@ -86,7 +88,7 @@ pub async fn run() {
                             history_index = history.len();
                             input_buffer.clear();
 
-                            print_prompt();
+                            print_prompt(&cwd);
                         }
                         '\x08' => {
                             if input_buffer.pop().is_some() {
@@ -134,15 +136,17 @@ pub async fn run() {
     }
 }
 
-fn print_prompt() {
+fn print_prompt(cwd: &str) {
     terminal::set_terminal_color(COLOR_GREEN);
     tprint!("KafkaSH");
+    terminal::set_terminal_color(COLOR_WHITE);
+    tprint!(":{}", cwd);
     terminal::set_terminal_color(COLOR_CYAN);
     tprint!("> ");
     terminal::set_terminal_color(COLOR_YELLOW);
 }
 
-fn execute_command(input: &str) {
+fn execute_command(input: &str, cwd: &mut String) {
     let mut parts = input.trim().split_whitespace();
     let command = match parts.next() {
         Some(s) => s,
@@ -154,7 +158,7 @@ fn execute_command(input: &str) {
 
     match command {
         "help" => tprintln!(
-            "Commands: help version clear echo ls cat calc kafkafetch shutdown touch write rm ps"
+            "Commands: help version clear echo ls cd cat calc kafkafetch shutdown touch write rm ps"
         ),
 
         "version" => tprintln!("KafkaOS v0.1.0"),
@@ -170,13 +174,100 @@ fn execute_command(input: &str) {
             tprintln!();
         }
 
+        "cd" => {
+            let target = match args.next() {
+                Some(s) => s,
+                None => {
+                    *cwd = String::from("/");
+                    return;
+                }
+            };
+
+            if target == "/" {
+                *cwd = String::from("/");
+            } else if target == ".." {
+                if *cwd != "/" {
+                    let trimmed = cwd.trim_end_matches('/');
+                    if let Some(pos) = trimmed.rfind('/') {
+                        if pos == 0 {
+                            *cwd = String::from("/");
+                        } else {
+                            *cwd = String::from(&trimmed[..pos]);
+                            if !cwd.ends_with('/') {
+                                cwd.push('/');
+                            }
+                        }
+                    }
+                }
+            } else {
+                let new_path = if target.starts_with('/') {
+                    let mut p = String::from(target);
+                    if !p.ends_with('/') {
+                        p.push('/');
+                    }
+                    p
+                } else {
+                    let mut p = cwd.clone();
+                    p.push_str(target);
+                    if !p.ends_with('/') {
+                        p.push('/');
+                    }
+                    p
+                };
+
+                if let Some(fs) = crate::fs::FILESYSTEM.get() {
+                    let fs_lock = fs.lock();
+                    let files = fs_lock.list_files();
+                    let prefix = new_path.trim_start_matches('/');
+                    let exists = files.iter().any(|f| f.starts_with(prefix));
+                    if exists {
+                        *cwd = new_path;
+                    } else {
+                        tprintln!("No such directory: {}", target);
+                    }
+                }
+            }
+        }
+
         "ls" => {
             if let Some(fs) = crate::fs::FILESYSTEM.get() {
-                let fs_mut = fs.lock();
-                let files = fs_mut.list_files();
-                tprintln!("Files in the DISK:");
-                for file in files {
-                    tprintln!(" - {}", file);
+                let fs_lock = fs.lock();
+                let files = fs_lock.list_files();
+                let prefix = cwd.trim_start_matches('/');
+
+                let mut entries: Vec<String> = Vec::new();
+
+                for file in &files {
+                    let relative = if prefix.is_empty() {
+                        file.as_str()
+                    } else if let Some(rest) = file.strip_prefix(prefix) {
+                        rest
+                    } else {
+                        continue;
+                    };
+
+                    let entry = if let Some(slash_pos) = relative.find('/') {
+                        format!("{}/", &relative[..slash_pos])
+                    } else {
+                        String::from(relative)
+                    };
+
+                    if !entry.is_empty() && !entries.contains(&entry) {
+                        entries.push(entry);
+                    }
+                }
+
+                if entries.is_empty() {
+                    tprintln!("(empty)");
+                } else {
+                    for entry in &entries {
+                        if entry.ends_with('/') {
+                            terminal::set_terminal_color(COLOR_CYAN);
+                        } else {
+                            terminal::set_terminal_color(COLOR_WHITE);
+                        }
+                        tprintln!("  {}", entry);
+                    }
                 }
             } else {
                 tprintln!("File system not initialized");
@@ -185,8 +276,15 @@ fn execute_command(input: &str) {
 
         "cat" => {
             if let Some(filename) = args.next() {
+                let full_path = if filename.starts_with('/') {
+                    String::from(filename.trim_start_matches('/'))
+                } else {
+                    let prefix = cwd.trim_start_matches('/');
+                    format!("{}{}", prefix, filename)
+                };
+
                 if let Some(fs) = crate::fs::FILESYSTEM.get() {
-                    match fs.lock().read_file(filename) {
+                    match fs.lock().read_file(&full_path) {
                         Some(data) => {
                             if let Ok(text) = core::str::from_utf8(&data) {
                                 tprintln!("{}", text);
@@ -240,8 +338,6 @@ fn execute_command(input: &str) {
 
         "ps" => {
             tprintln!("Process Status Report");
-            // NOTE: print_process_list uses println! internally,
-            // its output goes to serial. Update it later if needed.
             let sched = crate::scheduler::SCHEDULER.lock();
             sched.print_process_list(3);
         }
@@ -258,8 +354,14 @@ fn execute_command(input: &str) {
                 Some(s) => s,
                 None => { tprintln!("Usage: touch <filename>"); return; }
             };
+            let full_path = if filename.starts_with('/') {
+                String::from(filename.trim_start_matches('/'))
+            } else {
+                let prefix = cwd.trim_start_matches('/');
+                format!("{}{}", prefix, filename)
+            };
             if let Some(fs) = crate::fs::FILESYSTEM.get() {
-                fs.lock().write_file(filename, &[]);
+                fs.lock().write_file(&full_path, &[]);
                 tprintln!("File created: {}", filename);
             }
         }
@@ -269,13 +371,19 @@ fn execute_command(input: &str) {
                 Some(s) => s,
                 None => { tprintln!("Usage: write <file> <text>"); return; }
             };
+            let full_path = if filename.starts_with('/') {
+                String::from(filename.trim_start_matches('/'))
+            } else {
+                let prefix = cwd.trim_start_matches('/');
+                format!("{}{}", prefix, filename)
+            };
             let mut text = String::new();
             for arg in args {
                 text.push_str(arg);
                 text.push(' ');
             }
             if let Some(fs) = crate::fs::FILESYSTEM.get() {
-                fs.lock().write_file(filename, text.as_bytes());
+                fs.lock().write_file(&full_path, text.as_bytes());
                 tprintln!("Wrote to file: {}", filename);
             }
         }
@@ -285,8 +393,14 @@ fn execute_command(input: &str) {
                 Some(s) => s,
                 None => { tprintln!("Usage: rm <filename>"); return; }
             };
+            let full_path = if filename.starts_with('/') {
+                String::from(filename.trim_start_matches('/'))
+            } else {
+                let prefix = cwd.trim_start_matches('/');
+                format!("{}{}", prefix, filename)
+            };
             if let Some(fs) = crate::fs::FILESYSTEM.get() {
-                match fs.lock().remove_files(filename) {
+                match fs.lock().remove_files(&full_path) {
                     Ok(_) => tprintln!("Deleted: {}", filename),
                     Err(e) => tprintln!("Error: {}", e),
                 }
