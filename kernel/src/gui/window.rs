@@ -26,6 +26,12 @@ pub enum AppState {
     Terminal {
         terminal: super::terminal::GuiTerminal,
     },
+    Calculator {
+        display: alloc::string::String,
+        operand1: i32,
+        operator: Option<char>,
+        new_input: bool, // True if we just pressed +, -, etc.
+    },
 }
 
 pub struct Window {
@@ -159,6 +165,10 @@ impl Window {
                                     } else if y >= 75 && y <= 100 {
                                         crate::println!("Launching Settings...");
                                         self.close_btn = true;
+                                    } else if y >= 100 && y <= 125 { // Assuming this coordinate range
+                                        crate::println!("Launching Calculator...");
+                                        APP_REQUESTS.lock().push(crate::gui::graphics::AppRequest::Calculator);
+                                        self.close_btn = true;
                                     }
                                 }
                             }
@@ -195,6 +205,74 @@ impl Window {
                                 // 2. Call the draw function safely outside the lock!
                                 if needs_redraw {
                                     self.render_file_explorer();
+                                }
+                            }
+
+                            if self.title == "Calculator" {
+                                let mut needs_redraw = false;
+
+                                if let AppState::Calculator { ref mut display, ref mut operand1, ref mut operator, ref mut new_input } = self.app_state {
+                                    
+                                    // Did they click inside the grid area?
+                                    if y >= 70 && y <= 230 && x >= 10 && x <= 190 {
+                                        // Calculate exactly which button in the grid was clicked!
+                                        let col = (x - 10) / 45;
+                                        let row = (y - 70) / 40;
+                                        
+                                        if col < 4 && row < 4 {
+                                            let labels = [
+                                                '7', '8', '9', '/',
+                                                '4', '5', '6', '*',
+                                                '1', '2', '3', '-',
+                                                'C', '0', '=', '+'
+                                            ];
+                                            let btn = labels[(row * 4 + col) as usize];
+
+                                            match btn {
+                                                '0'..='9' => {
+                                                    if *new_input {
+                                                        display.clear();
+                                                        *new_input = false;
+                                                    }
+                                                    display.push(btn);
+                                                },
+                                                '+' | '-' | '*' | '/' => {
+                                                    // Parse the current display string into an integer
+                                                    if let Ok(val) = display.parse::<i32>() {
+                                                        *operand1 = val;
+                                                    }
+                                                    *operator = Some(btn);
+                                                    *new_input = true;
+                                                },
+                                                '=' => {
+                                                    if let (Ok(val2), Some(op)) = (display.parse::<i32>(), *operator) {
+                                                        let result = match op {
+                                                            '+' => *operand1 + val2,
+                                                            '-' => *operand1 - val2,
+                                                            '*' => *operand1 * val2,
+                                                            '/' => if val2 != 0 { *operand1 / val2 } else { 0 }, // Prevent divide by zero!
+                                                            _ => 0,
+                                                        };
+                                                        *display = alloc::format!("{}", result);
+                                                        *new_input = true;
+                                                        *operator = None;
+                                                    }
+                                                },
+                                                'C' => {
+                                                    *display = alloc::string::String::from("0");
+                                                    *operand1 = 0;
+                                                    *operator = None;
+                                                    *new_input = true;
+                                                },
+                                                _ => {}
+                                            }
+                                            needs_redraw = true;
+                                        }
+                                    }
+                                } // Lock released
+
+                                if needs_redraw {
+                                    self.render_calculator();
                                 }
                             }
 
@@ -244,6 +322,7 @@ impl Window {
         Text::new("Terminal", Point::new(10, 40), style).draw(self).unwrap();
         Text::new("Files", Point::new(10, 65), style).draw(self).unwrap();
         Text::new("Settings", Point::new(10, 90), style).draw(self).unwrap();
+        Text::new("Calculator", Point::new(10, 115), style).draw(self).unwrap();
     }
 
     // File Explorer
@@ -310,10 +389,54 @@ impl Window {
         ));
     }
 
-    // Terminal
-    //pub fn render_terminal(&mut self) {
-    //    self.render_internal_graphics();
-    //}
+    pub fn render_calculator(&mut self) {
+        self.render_internal_graphics(); // Draws the border and title bar
+
+        let text_style = MonoTextStyle::new(&FONT_8X13, Rgb888::BLACK);
+        let btn_style = MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE);
+
+        // 1. Draw the "LCD Display" (White box at the top)
+        Rectangle::new(Point::new(10, 30), Size::new(180, 30))
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::WHITE))
+            .draw(self).unwrap();
+
+        // Safely fetch the current display string from the state
+        let display_text = match &self.app_state {
+            AppState::Calculator { display, .. } => display.clone(),
+            _ => alloc::string::String::from("Error"),
+        };
+
+        Text::new(&display_text, Point::new(15, 50), text_style).draw(self).unwrap();
+
+        // 2. Draw the 4x4 Button Grid
+        let labels = [
+            "7", "8", "9", "/",
+            "4", "5", "6", "*",
+            "1", "2", "3", "-",
+            "C", "0", "=", "+"
+        ];
+
+        let mut idx = 0;
+        for row in 0..4 {
+            for col in 0..4 {
+                let bx = 10 + (col * 45); // 45 pixels wide per button
+                let by = 70 + (row * 40); // 40 pixels tall per button
+
+                // Draw button background
+                Rectangle::new(Point::new(bx, by), Size::new(40, 35))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb888::new(80, 80, 80)))
+                    .draw(self).unwrap();
+
+                // Draw button text
+                Text::new(labels[idx], Point::new(bx + 15, by + 22), btn_style).draw(self).unwrap();
+                idx += 1;
+            }
+        }
+
+        crate::gui::graphics::report_damage(crate::gui::geometry::Rect::new(
+            self.x, self.y, self.width as i32, self.height as i32
+        ));
+    }
 }
 
 impl OriginDimensions for Window {

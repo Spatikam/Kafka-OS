@@ -54,6 +54,7 @@ pub enum AppRequest {
     Files,
     Terminal,
     Settings,
+    Calculator
 }
 
 pub static APP_REQUESTS: spin::Mutex<alloc::vec::Vec<AppRequest>> = spin::Mutex::new(alloc::vec::Vec::new());
@@ -147,6 +148,20 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     term_win.app_state = temp_state;
 
                     wm.add_window(term_win);
+                },
+                AppRequest::Calculator => {
+                    let mut calc_win = Window::with_state(
+                        150, 150, 200, 250, 
+                        "Calculator", Rgb888::new(50, 50, 50), taskbar.bpp,
+                        crate::gui::window::AppState::Calculator {
+                            display: alloc::string::String::from("0"),
+                            operand1: 0,
+                            operator: None,
+                            new_input: true,
+                        }
+                    );
+                    calc_win.render_calculator(); 
+                    wm.add_window(calc_win);
                 },
                 _ => {} // Handle Terminal and Settings later
             }
