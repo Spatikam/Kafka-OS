@@ -23,6 +23,9 @@ pub enum AppState {
         current_path: alloc::string::String,
         displayed_entries: alloc::vec::Vec<alloc::string::String>,
     },
+    Terminal {
+        terminal: super::terminal::GuiTerminal,
+    },
 }
 
 pub struct Window {
@@ -306,6 +309,11 @@ impl Window {
             self.x, self.y, self.width as i32, self.height as i32
         ));
     }
+
+    // Terminal
+    //pub fn render_terminal(&mut self) {
+    //    self.render_internal_graphics();
+    //}
 }
 
 impl OriginDimensions for Window {

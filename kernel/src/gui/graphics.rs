@@ -129,7 +129,24 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     wm.add_window(file_win);
                 },
                 AppRequest::Terminal => {
-                    super::terminal::init_terminal(taskbar.bpp);
+                    let mut term_win = Window::with_state(
+                        100, 100, 400, 300, 
+                        "Terminal", Rgb888::BLACK, taskbar.bpp,
+                        AppState::Terminal {
+                            terminal: super::terminal::GuiTerminal::new(),
+                        }
+                    );
+                    // Draw the window background and the terminal text
+                    term_win.render_internal_graphics();
+                    let mut temp_state = core::mem::replace(&mut term_win.app_state, crate::gui::window::AppState::None);
+                    
+                    if let AppState::Terminal { ref mut terminal } = temp_state {
+                        terminal.render_into_window(&mut term_win);
+                    }
+
+                    term_win.app_state = temp_state;
+
+                    wm.add_window(term_win);
                 },
                 _ => {} // Handle Terminal and Settings later
             }
@@ -255,10 +272,6 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         ));
                     }
 
-                    /*report_damage(Rect::new(
-                        window.x, window.y, window.width as i32, window.height as i32
-                    ));*/
-
                     // 2. Move the window
                     window.x = new_x;
                     window.y = new_y;
@@ -270,6 +283,35 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 }
             }
         }
+
+        let mut global_term_state = super::terminal::GUI_TERMINAL.lock();
+        
+        if global_term_state.needs_redraw {
+            for window in &mut wm.windows {
+                let mut temp_state = core::mem::replace(&mut window.app_state, AppState::None);
+
+                if let AppState::Terminal { ref mut terminal } = temp_state {
+                    // Did the cursor move, OR was a clear/scroll triggered?
+                    //if terminal.row != global_term_state.row || terminal.col != global_term_state.col || global_term_state.needs_full_redraw {
+                    *terminal = global_term_state.clone();
+                    
+                    // RENDER TO THE REAL WINDOW
+                    terminal.render_into_window(window);
+                    
+                    // Report damage exactly where the window is currently located!
+                    report_damage(Rect::new(
+                        window.x, window.y + 20, window.width as i32, window.height as i32 - 20
+                    ));
+                    
+                    // Reset the global redraw flag now that it has been handled
+                    //global_term_state.needs_full_redraw = false;
+                    global_term_state.needs_redraw = false;
+                    crate::println!("Term loop {}", window.title);
+                }
+                window.app_state = temp_state;
+            }
+        }
+        drop(global_term_state);
 
         // 2. Extract all damage rects and instantly unlock the queue
         // so other tasks aren't blocked from reporting new damage.
@@ -307,7 +349,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             }
 
             // Check against the Terminal window
-            if !fully_covered {
+            /*if !fully_covered {
                 let win_guard = crate::gui::terminal::TERMINAL_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref() {
                     let win_rect = Rect::new(
@@ -318,7 +360,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         fully_covered = true;
                     }
                 }
-            }
+            }*/
             if !fully_covered {
                 display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
             }
@@ -332,7 +374,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
                 }
             }
-            {
+            /*{
                 let win_guard = crate::gui::terminal::TERMINAL_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref() {
                     let win_rect = Rect::new(
@@ -343,7 +385,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
                     }
                 }
-            }
+            }*/
 
             // Draw the Taskbar over everything else
             let taskbar_rect = Rect::new(0, 0, taskbar.width as i32, taskbar.height as i32);
