@@ -28,9 +28,7 @@ pub enum AppState {
     },
     Calculator {
         display: alloc::string::String,
-        operand1: i32,
-        operator: Option<char>,
-        new_input: bool, // True if we just pressed +, -, etc.
+        clear_on_next: bool,
     },
 }
 
@@ -211,7 +209,7 @@ impl Window {
                             if self.title == "Calculator" {
                                 let mut needs_redraw = false;
 
-                                if let AppState::Calculator { ref mut display, ref mut operand1, ref mut operator, ref mut new_input } = self.app_state {
+                                if let AppState::Calculator { ref mut display, ref mut clear_on_next } = self.app_state {
                                     
                                     // Did they click inside the grid area?
                                     if y >= 70 && y <= 230 && x >= 10 && x <= 190 {
@@ -230,39 +228,33 @@ impl Window {
 
                                             match btn {
                                                 '0'..='9' => {
-                                                    if *new_input {
+                                                    if *clear_on_next || display == "0" || display == "Error" || display == "Div by 0" {
                                                         display.clear();
-                                                        *new_input = false;
+                                                        *clear_on_next = false;
                                                     }
                                                     display.push(btn);
                                                 },
                                                 '+' | '-' | '*' | '/' => {
-                                                    // Parse the current display string into an integer
-                                                    if let Ok(val) = display.parse::<i32>() {
-                                                        *operand1 = val;
+                                                    *clear_on_next = false;
+                                                    
+                                                    // Smart UX: If they click '+' then '-', replace the '+' instead of crashing
+                                                    if let Some(last_char) = display.chars().last() {
+                                                        if "+-*/".contains(last_char) {
+                                                            display.pop(); 
+                                                        }
                                                     }
-                                                    *operator = Some(btn);
-                                                    *new_input = true;
+                                                    display.push(btn);
                                                 },
                                                 '=' => {
-                                                    if let (Ok(val2), Some(op)) = (display.parse::<i32>(), *operator) {
-                                                        let result = match op {
-                                                            '+' => *operand1 + val2,
-                                                            '-' => *operand1 - val2,
-                                                            '*' => *operand1 * val2,
-                                                            '/' => if val2 != 0 { *operand1 / val2 } else { 0 }, // Prevent divide by zero!
-                                                            _ => 0,
-                                                        };
-                                                        *display = alloc::format!("{}", result);
-                                                        *new_input = true;
-                                                        *operator = None;
+                                                    match evaluate_expression(display) {
+                                                        Ok(result) => *display = alloc::format!("{}", result),
+                                                        Err(e) => *display = alloc::string::String::from(e),
                                                     }
+                                                    *clear_on_next = true;
                                                 },
                                                 'C' => {
                                                     *display = alloc::string::String::from("0");
-                                                    *operand1 = 0;
-                                                    *operator = None;
-                                                    *new_input = true;
+                                                    *clear_on_next = false;
                                                 },
                                                 _ => {}
                                             }
@@ -499,5 +491,79 @@ impl WindowManager {
 
     pub fn add_window(&mut self, window: Window) {
         self.windows.push(window);
+    }
+}
+
+// Calculator Functions
+fn precedence(op: char) -> u8 {
+    match op {
+        '+' | '-' => 1,
+        '*' | '/' => 2,
+        _ => 0,
+    }
+}
+
+fn apply_op(a: i32, b: i32, op: char) -> Result<i32, &'static str> {
+    match op {
+        '+' => Ok(a + b),
+        '-' => Ok(a - b),
+        '*' => Ok(a * b),
+        '/' => if b == 0 { Err("Div by 0") } else { Ok(a / b) },
+        _ => Err("Invalid op"),
+    }
+}
+
+fn evaluate_expression(expr: &str) -> Result<i32, &'static str> {
+    let mut nums: alloc::vec::Vec<i32> = alloc::vec::Vec::new();
+    let mut ops: alloc::vec::Vec<char> = alloc::vec::Vec::new();
+    
+    let mut current_num = 0;
+    let mut parsing_num = false;
+
+    for c in expr.chars() {
+        if c.is_ascii_digit() {
+            // Build multi-digit numbers (e.g., '1' then '2' becomes 12)
+            current_num = current_num * 10 + (c as i32 - 48);
+            parsing_num = true;
+        } else if "+-*/".contains(c) {
+            if !parsing_num { return Err("Syntax Error"); }
+            nums.push(current_num);
+            current_num = 0;
+            parsing_num = false;
+            
+            // Resolve previous operations if they have higher or equal precedence
+            while let Some(&top_op) = ops.last() {
+                if precedence(top_op) >= precedence(c) {
+                    let op = ops.pop().unwrap();
+                    let b = nums.pop().unwrap();
+                    let a = nums.pop().unwrap();
+                    nums.push(apply_op(a, b, op)?);
+                } else {
+                    break;
+                }
+            }
+            ops.push(c);
+        }
+    }
+    
+    // Push the very last number
+    if parsing_num {
+        nums.push(current_num);
+    } else {
+        return Err("Syntax Error");
+    }
+
+    // Resolve any remaining operations in the stacks
+    while let Some(op) = ops.pop() {
+        if nums.len() < 2 { return Err("Syntax Error"); }
+        let b = nums.pop().unwrap();
+        let a = nums.pop().unwrap();
+        nums.push(apply_op(a, b, op)?);
+    }
+
+    if nums.len() == 1 {
+        Ok(nums[0])
+    } else {
+        Err("Parse Error")
     }
 }

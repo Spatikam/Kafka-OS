@@ -155,9 +155,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         "Calculator", Rgb888::new(50, 50, 50), taskbar.bpp,
                         crate::gui::window::AppState::Calculator {
                             display: alloc::string::String::from("0"),
-                            operand1: 0,
-                            operator: None,
-                            new_input: true,
+                            clear_on_next: false,
                         }
                     );
                     calc_win.render_calculator(); 
@@ -321,7 +319,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     // Reset the global redraw flag now that it has been handled
                     //global_term_state.needs_full_redraw = false;
                     global_term_state.needs_redraw = false;
-                    crate::println!("Term loop {}", window.title);
+                    //crate::println!("Term loop {}", window.title);
                 }
                 window.app_state = temp_state;
             }
