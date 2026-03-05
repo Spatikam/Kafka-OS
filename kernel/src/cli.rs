@@ -4,6 +4,7 @@ use crate::task::keyboard::ScancodeStream;
 use crate::exit_qemu;
 use crate::QemuExitCode;
 use crate::gui::terminal::{self, COLOR_CYAN, COLOR_YELLOW, COLOR_GREEN, COLOR_WHITE, COLOR_RED};
+use crate::gui::notepad;
 use futures_util::stream::StreamExt;
 use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1, KeyCode};
 use alloc::string::String;
@@ -23,11 +24,57 @@ pub async fn run() {
     let mut history_index: usize = 0;
     let mut cwd = String::from("/");
 
+    // we need to track these ourselves for notepad shortcuts, would help use to trigger some func.
+    let mut ctrl_pressed = false;
+    let mut shift_pressed = false;
+    
     print_prompt(&cwd);
 
     while let Some(scancode) = scancodes.next().await {
         if let Ok(Some(key_event)) = keyboard.add_byte(scancode) {
+            // track modifier keys from the raw event
+            let is_down = key_event.state == pc_keyboard::KeyState::Down;
+            match key_event.code {
+                KeyCode::LControl | KeyCode::RControl => {
+                    ctrl_pressed = is_down;
+                }
+                KeyCode::LShift | KeyCode::RShift => {
+                    shift_pressed = is_down;
+                }
+                _ => {}
+            }
+
+            // always process key event (keeps keyboard decoder state in sync)
             if let Some(key) = keyboard.process_keyevent(key_event) {
+
+                
+                // if notepad is open, send all keys there instead of the terminal  // yeah this is a bit of conflict
+                // for now if this is open, we can't access the terminal.. we kinda need to do some kind of sharing.
+                // so when we make the stuff dynammic, i will reroute this.. 
+                if notepad::is_active() {
+                    // check for escape to close notepad
+                    let is_escape = matches!(
+                        key,
+                        DecodedKey::Unicode('\x1B') | DecodedKey::RawKey(KeyCode::Escape)
+                    );
+
+                    if is_escape {
+                        // only close if we're in editing mode (not typing a filename)
+                        let in_prompt = {
+                            let state = notepad::NOTEPAD_STATE.lock();
+                            state.mode != crate::gui::notepad::Mode::Editing
+                        };
+                        if in_prompt {
+                            // let notepad handle it (cancel the prompt)
+                            notepad::handle_key(key, ctrl_pressed, shift_pressed);
+                        } else {
+                            notepad::close_notepad();
+                        }
+                    } else {
+                        notepad::handle_key(key, ctrl_pressed, shift_pressed);
+                    }
+                    continue; 
+                }
                 match key {
                     DecodedKey::Unicode(character) => match character {
                         '\n' => {
@@ -356,6 +403,16 @@ fn execute_command(input: &str, cwd: &mut String) {
                     Ok(_) => tprintln!("Deleted: {}", filename),
                     Err(e) => tprintln!("Error: {}", e),
                 }
+            }
+        }
+        "notepad" => {
+            let bpp = notepad::get_bpp();
+            if let Some(filename) = args.next(){
+                tprintln!("Opening {}",filename);
+                notepad::open_notepad_with_file(bpp, filename);
+            }else{
+                tprintln!("Opening Notepad...");
+                notepad::open_notepad(bpp);
             }
         }
 
