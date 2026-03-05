@@ -1165,10 +1165,11 @@ fn handle_prompt_key(state: &mut NotepadState, key: DecodedKey, mode: Mode) {
 }
 
 pub fn get_bpp() -> usize {
-    let win_guard = super::terminal::TERMINAL_WINDOW.lock();
+    /*let win_guard = super::terminal::TERMINAL_WINDOW.lock();
     if let Some(window) = win_guard.as_ref() {
         window.bpp
     } else {
         3 // default fallback, since, we three sincked to 3 so yeah it should work !!
-    }
+    }*/
+    4
 }
