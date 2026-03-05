@@ -11,10 +11,12 @@ use embedded_graphics::{
     text::Text,
 };
 
-use crate::gui::graphics::{UIEvent, RawMouse, APP_REQUESTS};
+use crate::gui::graphics::{UIEvent, RawMouse, APP_REQUESTS, report_damage};
 use crate::{exit_qemu,QemuExitCode};
 //use crate::gui::paint::{PAINT_APP};
 use core::convert::Infallible;
+
+use crate::gui::geometry::Rect; //geometry module
 
 // For Application Specific Parameters
 pub enum AppState {
@@ -32,7 +34,6 @@ pub enum AppState {
     },
     Paint {
         paint: super::paint::PaintApp,
-
     }
 }
 
@@ -116,7 +117,7 @@ impl Window {
             .unwrap();
 
         // Tell the Compositor that this window's area on the physical screen is damaged
-        super::graphics::report_damage(crate::gui::geometry::Rect::new(
+        report_damage(Rect::new(
             self.x, self.y, self.width as i32, self.height as i32
         ));
     }
@@ -208,7 +209,8 @@ impl Window {
                                     self.render_file_explorer();
                                 }
                             } else if self.title == "Paint" {
-                                super::paint::handle_paint_click(raw_x, raw_y, self.x, self.y);
+                                super::paint::handle_paint_click(raw_x, raw_y, self.x, self.y, self);
+                                //self.render_paint();
 
                             } else if self.title == "Calculator" {
                                 let mut needs_redraw = false;
@@ -282,7 +284,7 @@ impl Window {
                         },
                         RawMouse::Left_Pressed (raw_x, raw_y) => {
                             if self.title == "Paint" {
-                                super::paint::handle_paint_click(raw_x, raw_y, self.x, self.y);
+                                super::paint::handle_paint_click(raw_x, raw_y, self.x, self.y, self);
                             }
                         },
                         _ => {}
@@ -385,7 +387,7 @@ impl Window {
         }
 
         // Report damage
-        crate::gui::graphics::report_damage(crate::gui::geometry::Rect::new(
+        report_damage(Rect::new(
             self.x, self.y, self.width as i32, self.height as i32
         ));
     }
@@ -434,9 +436,39 @@ impl Window {
             }
         }
 
-        crate::gui::graphics::report_damage(crate::gui::geometry::Rect::new(
+        report_damage(Rect::new(
             self.x, self.y, self.width as i32, self.height as i32
         ));
+    }
+
+    pub fn render_paint(&mut self) {
+        let mut global_paint_state = super::paint::PAINT_APP.lock();  
+
+        if global_paint_state.needs_redraw {
+            //for window in &mut wm.windows {
+            let mut temp_state = core::mem::replace(&mut self.app_state, AppState::None);
+
+            if let AppState::Paint { ref mut paint } = temp_state {
+
+                *paint = global_paint_state.clone();
+                
+                // RENDER TO THE REAL WINDOW
+                paint.render_into_window(self);
+                
+                // Report damage exactly where the window is currently located!
+                report_damage(Rect::new(
+                    self.x, self.y + 20, self.width as i32, self.height as i32 - 20
+                ));
+                
+                // Reset the global redraw flag now that it has been handled
+                //global_term_state.needs_full_redraw = false;
+                //crate::println!("Term loop {}", window.title);
+            }
+            self.app_state = temp_state;
+
+            global_paint_state.needs_redraw = false;
+            //}
+        }
     }
 }
 

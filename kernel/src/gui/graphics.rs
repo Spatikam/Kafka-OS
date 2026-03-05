@@ -356,35 +356,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     window.app_state = temp_state;
                     //}
                 }
-            } else if window.title == "Paint" {
-                let mut global_paint_state = super::paint::PAINT_APP.lock();  
-
-                if global_paint_state.needs_redraw {
-                    //for window in &mut wm.windows {
-                    let mut temp_state = core::mem::replace(&mut window.app_state, AppState::None);
-
-                    if let AppState::Paint { ref mut paint } = temp_state {
-                        
-                        *paint = global_paint_state.clone();
-                        
-                        // RENDER TO THE REAL WINDOW
-                        paint.render_into_window(window);
-                        
-                        // Report damage exactly where the window is currently located!
-                        report_damage(Rect::new(
-                            window.x, window.y + 20, window.width as i32, window.height as i32 - 20
-                        ));
-                        
-                        // Reset the global redraw flag now that it has been handled
-                        //global_term_state.needs_full_redraw = false;
-                        //crate::println!("Term loop {}", window.title);
-                    }
-                    window.app_state = temp_state;
-
-                    global_paint_state.needs_redraw = false;
-                    //}
-                }
-            }
+            } 
         }
         //drop(global_term_state);
         //drop(global_paint_state);
@@ -424,7 +396,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 }
             }
 
-            if !fully_covered{
+            /*if !fully_covered{
                 let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref(){
                     let win_rect = Rect::new(
@@ -434,7 +406,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         fully_covered = true;
                     }
                 }
-            }
+            }*/
 
             if !fully_covered {
                 display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
@@ -449,56 +421,10 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
                 }
             }
-            /*{
-                let win_guard = crate::gui::terminal::TERMINAL_WINDOW.lock();
-                if let Some(window) = win_guard.as_ref() {
-                    let win_rect = Rect::new(
-                        window.x,
-                        window.y,
-                        window.width as i32,
-                        window.height as i32,
-                    );
-                    if let Some(overlap) = damage.intersection(&win_rect) {
-                        // Subtract the notepad area — only blit visible parts
-                        if crate::gui::notepad::is_active() {
-                            let np_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
-                            let visible_parts = if let Some(np) = np_guard.as_ref() {
-                                let np_rect = Rect::new(
-                                    np.x, np.y,
-                                    np.width as i32, np.height as i32,
-                                );
-                                overlap.subtract(&np_rect)
-                            } else {
-                                alloc::vec![overlap]
-                            };
-                            drop(np_guard);
-                            for part in visible_parts {
-                                display.blit_partial(&part, window);
-                            }
-                        } else {
-                            display.blit_partial(&overlap, window);
-                        }
-                    }
-                }
-            }*/
-
-            // Blit the Paint window
-            /*{
-                let win_guard = crate::gui::paint::PAINT_WINDOW.lock();
-                if let Some(window) = win_guard.as_ref() {
-                    let win_rect = Rect::new(
-                        window.x, window.y,
-                        window.width as i32, window.height as i32,
-                    );
-                    if let Some(overlap) = damage.intersection(&win_rect) {
-                        display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
-                    }
-                }
-            }*/
                     
             // Notepad window (on top of terminal)  this is just for now
             // I guess we have to change this when we bring the dynammic window sizing.
-            {
+            /*{
                 let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref() {
                     let win_rect = Rect::new(
@@ -509,7 +435,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
                     }
                 }
-            }
+            }*/
 
             // Draw the Taskbar over everything else
             let taskbar_rect = Rect::new(0, 0, taskbar.width as i32, taskbar.height as i32);
