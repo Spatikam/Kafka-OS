@@ -36,7 +36,7 @@ const TERM_ROWS: usize = 20;
 
 
 #[derive(Copy, Clone, PartialEq)]
-struct TermCell {
+pub struct TermCell {
     ch: u8,
     fg: u8,
 }
@@ -234,7 +234,7 @@ pub fn _tprint(args: fmt::Arguments) {
         term.write_fmt(args).unwrap();
         term.needs_redraw = true;
 
-        drop(term);
+        //drop(term);
 
 
         if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
