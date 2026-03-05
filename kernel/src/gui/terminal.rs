@@ -64,13 +64,15 @@ fn palette(idx: u8) -> Rgb888 {
     }
 }
 
+#[derive(Clone)]
 pub struct GuiTerminal {
-    cells: [[TermCell; TERM_COLS]; TERM_ROWS],
-    col: usize,
-    row: usize,
-    fg: u8,
-    prev_row: usize,
-    needs_full_redraw: bool,
+    pub cells: [[TermCell; TERM_COLS]; TERM_ROWS],
+    pub col: usize,
+    pub row: usize,
+    pub fg: u8,
+    pub prev_row: usize,
+    pub needs_full_redraw: bool,
+    pub needs_redraw: bool,
 }
 
 impl GuiTerminal {
@@ -82,6 +84,7 @@ impl GuiTerminal {
             fg: COLOR_GREEN,
             prev_row: 0,
             needs_full_redraw: true, 
+            needs_redraw: false,
         }
     }
 
@@ -176,7 +179,7 @@ impl GuiTerminal {
             .draw(window);
         }
     }
-    fn render_into_window(&mut self, window: &mut Window) {
+    pub fn render_into_window(&mut self, window: &mut Window) {
         if self.needs_full_redraw {
             // Scroll or clear: redraw all rows
             for r in 0..TERM_ROWS {
@@ -210,6 +213,7 @@ impl fmt::Write for GuiTerminal {
 //declared it globally
 pub static GUI_TERMINAL: Mutex<GuiTerminal> = Mutex::new(GuiTerminal::new());
 
+/*
 pub static TERMINAL_WINDOW: Mutex<Option<Window>> = Mutex::new(None);
 
 pub fn init_terminal(bpp: usize) {
@@ -221,14 +225,23 @@ pub fn init_terminal(bpp: usize) {
     win.render_internal_graphics();
     *TERMINAL_WINDOW.lock() = Some(win);
 }
+*/
 
 pub fn _tprint(args: fmt::Arguments) {
     use core::fmt::Write;
     x86_64::instructions::interrupts::without_interrupts(|| {
         let mut term = GUI_TERMINAL.lock();
         term.write_fmt(args).unwrap();
+        term.needs_redraw = true;
 
-        let mut win_guard = TERMINAL_WINDOW.lock();
+        drop(term);
+
+
+        if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
+            waker.wake();
+        }
+
+        /*let mut win_guard = TERMINAL_WINDOW.lock();
         if let Some(window) = win_guard.as_mut() {
             term.render_into_window(window);
         }
@@ -246,6 +259,7 @@ pub fn _tprint(args: fmt::Arguments) {
         if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
             waker.wake();
         }
+        */
     });
 }
 
@@ -259,7 +273,15 @@ pub fn clear_terminal() {
     x86_64::instructions::interrupts::without_interrupts(|| {
         let mut term = GUI_TERMINAL.lock();
         term.clear();
+        term.needs_redraw = true;
 
+        drop(term);
+
+        if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
+            waker.wake();
+        }
+
+        /*
         let mut win_guard = TERMINAL_WINDOW.lock();
         if let Some(window) = win_guard.as_mut() {
             term.render_into_window(window);
@@ -274,7 +296,7 @@ pub fn clear_terminal() {
 
         if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
             waker.wake();
-        }
+        }*/
     });
 }
 
