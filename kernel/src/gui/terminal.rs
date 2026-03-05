@@ -236,11 +236,6 @@ pub fn _tprint(args: fmt::Arguments) {
 
         //drop(term);
 
-
-        if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
-            waker.wake();
-        }
-
         /*let mut win_guard = TERMINAL_WINDOW.lock();
         if let Some(window) = win_guard.as_mut() {
             term.render_into_window(window);
@@ -261,6 +256,9 @@ pub fn _tprint(args: fmt::Arguments) {
         }
         */
     });
+    if let Some(waker) = COMPOSITOR_WAKER.lock().take(){
+        waker.wake();
+    }
 }
 
 pub fn set_terminal_color(fg: u8) {

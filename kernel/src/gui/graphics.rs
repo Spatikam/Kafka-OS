@@ -361,11 +361,12 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
 
                 if let AppState::Terminal { mut terminal } = temp_state {
                     // Sync the local terminal from the snapshot
+                    let old_row = terminal.row;
                     terminal.cells = snapshot_cells;
                     terminal.row = snapshot_row;
                     terminal.col = snapshot_col;
                     terminal.fg = snapshot_fg;
-                    if snapshot_full {
+                    if snapshot_full  || old_row != snapshot_row{
                         terminal.needs_full_redraw = true;
                     }
                     // Render into the WM-owned window
