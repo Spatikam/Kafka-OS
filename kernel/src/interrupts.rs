@@ -7,6 +7,8 @@ use spin;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 use crossbeam_queue::ArrayQueue;
 use core::sync::atomic::{AtomicU64,Ordering};
+use crate::gui::graphics;
+
 pub static TICKS:AtomicU64=AtomicU64::new(0);
 
 
@@ -102,6 +104,19 @@ extern "x86-interrupt" fn double_fault_handler(
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     // print!("."); // Uncomment to see timer ticks
     TICKS.fetch_add(1,Ordering::Relaxed);
+
+    // Increment the heartbeat
+    let ticks = graphics::PIT_TICKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
+    
+    // Every ~1 second (18 ticks), ring the alarm clock!
+    if ticks % 18 == 0 {
+        graphics::CLOCK_TICK.store(true, core::sync::atomic::Ordering::Relaxed);
+        
+        // Wake up the Compositor!
+        if let Some(waker) = crate::gui::graphics::COMPOSITOR_WAKER.lock().take() {
+            waker.wake();
+        }
+    }
     unsafe {
         PICS.lock()
             .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
