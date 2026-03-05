@@ -23,20 +23,11 @@ pub async fn run() {
     let mut history: Vec<String> = Vec::new();
     let mut history_index: usize = 0;
     let mut cwd = String::from("/");
-<<<<<<< HEAD
 
     // we need to track these ourselves for notepad shortcuts, would help use to trigger some func.
     let mut ctrl_pressed = false;
     let mut shift_pressed = false;
     
-=======
-    // we need to track these ourselves for notepad shortcuts, would help use to trigger some func.
-    let mut ctrl_pressed = false;
-    let mut shift_pressed = false;
-
-    //print_prompt();
-
->>>>>>> fe29656a67388f0da14b14425c407cee63c2f574
     print_prompt(&cwd);
 
     while let Some(scancode) = scancodes.next().await {
