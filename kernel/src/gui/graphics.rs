@@ -53,7 +53,7 @@ pub static CLOCK_TICK: AtomicBool = AtomicBool::new(false);
 pub enum AppRequest {
     Files,
     Terminal,
-    Settings,
+    Paint,
     Calculator
 }
 
@@ -144,7 +144,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     );
                     // Draw the window background and the terminal text
                     term_win.render_internal_graphics();
-                    let mut temp_state = core::mem::replace(&mut term_win.app_state, crate::gui::window::AppState::None);
+                    let mut temp_state = core::mem::replace(&mut term_win.app_state, AppState::None);
                     
                     if let AppState::Terminal { ref mut terminal } = temp_state {
                         terminal.needs_full_redraw = true;
@@ -171,7 +171,26 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     calc_win.render_calculator(); 
                     wm.add_window(calc_win);
                 },
-                _ => {} // Handle Terminal and Settings later
+                AppRequest::Paint => {
+                    let mut paint_win = Window::with_state(
+                        120, 60, 270, 310,
+                        "Paint", Rgb888::WHITE, taskbar.bpp,
+                        AppState::Paint {
+                            paint: super::paint::PaintApp::new(),
+                        }
+                    );
+                    paint_win.render_internal_graphics();
+                    let mut temp_state = core::mem::replace(&mut paint_win.app_state, AppState::None);
+                    
+                    if let AppState::Paint { ref mut paint } = temp_state {
+                        paint.render_into_window(&mut paint_win);
+                    }
+
+                    paint_win.app_state = temp_state;
+
+                    wm.add_window(paint_win);
+                },
+                _ => {} 
             }
         }
 
@@ -258,16 +277,31 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         window.is_dragging = false;
                     }
                 },
+                RawMouse::Left_Pressed (x, y) => {
+                    for (i, window) in wm.windows.iter_mut().enumerate().rev() {
+                        if x >= window.x && x < window.x + (window.width as i32) &&
+                           y >= window.y && y < window.y + (window.height as i32) 
+                        {
+                            window.send_event(UIEvent::MouseClick { 
+                                x: x - window.x, y: y - window.y, 
+                                button: event
+                            });
+                            window.process_events();
+                            break; 
+                        }
+                    }
+                }
                 _ => {} 
             }
         }
 
-        // --- THE DRAG ENGINE ---
-        // Grab the live atomic coordinates of the cursor
-        let global_mouse_x = MOUSE_X.load(core::sync::atomic::Ordering::Relaxed) as i32;
-        let global_mouse_y = MOUSE_Y.load(core::sync::atomic::Ordering::Relaxed) as i32;
 
-        for window in &mut wm.windows {
+        if let Some(window) = wm.windows.last_mut() {
+            // --- THE DRAG ENGINE ---
+            // Grab the live atomic coordinates of the cursor
+            let global_mouse_x = MOUSE_X.load(core::sync::atomic::Ordering::Relaxed) as i32;
+            let global_mouse_y = MOUSE_Y.load(core::sync::atomic::Ordering::Relaxed) as i32;
+            
             if window.is_dragging {
                 // Calculate the new physical position using the local grab offset
                 let new_x = (global_mouse_x - window.drag_x).clamp(0, screen_width - window.width as i32);
@@ -417,37 +451,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 }
             }
 
-            // Check against the Terminal window
-            /*if !fully_covered {
-                let win_guard = crate::gui::terminal::TERMINAL_WINDOW.lock();
-                if let Some(window) = win_guard.as_ref() {
-                    let win_rect = Rect::new(
-                        window.x, window.y,
-                        window.width as i32, window.height as i32,
-                    );
-                    if win_rect.contains_rect(&damage) {
-                        fully_covered = true;
-                    }
-                }
-            }*/
-
-            // Check against the Paint window
-            if !fully_covered {
-                let win_guard = crate::gui::paint::PAINT_WINDOW.lock();
-                if let Some(window) = win_guard.as_ref() {
-                    let win_rect = Rect::new(
-                        window.x,
-                        window.y,
-                        window.width as i32,
-                        window.height as i32,
-                    );
-                    if win_rect.contains_rect(&damage) {
-                        fully_covered = true;
-                    }
-                }
-            }
-
-            if !fully_covered{
+            /*if !fully_covered{
                 let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref(){
                     let win_rect = Rect::new(
@@ -457,7 +461,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         fully_covered = true;
                     }
                 }
-            }
+            }*/
 
             if !fully_covered {
                 display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
@@ -472,56 +476,10 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
                 }
             }
-            /*{
-                let win_guard = crate::gui::terminal::TERMINAL_WINDOW.lock();
-                if let Some(window) = win_guard.as_ref() {
-                    let win_rect = Rect::new(
-                        window.x,
-                        window.y,
-                        window.width as i32,
-                        window.height as i32,
-                    );
-                    if let Some(overlap) = damage.intersection(&win_rect) {
-                        // Subtract the notepad area — only blit visible parts
-                        if crate::gui::notepad::is_active() {
-                            let np_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
-                            let visible_parts = if let Some(np) = np_guard.as_ref() {
-                                let np_rect = Rect::new(
-                                    np.x, np.y,
-                                    np.width as i32, np.height as i32,
-                                );
-                                overlap.subtract(&np_rect)
-                            } else {
-                                alloc::vec![overlap]
-                            };
-                            drop(np_guard);
-                            for part in visible_parts {
-                                display.blit_partial(&part, window);
-                            }
-                        } else {
-                            display.blit_partial(&overlap, window);
-                        }
-                    }
-                }
-            }*/
-
-            // Blit the Paint window
-            {
-                let win_guard = crate::gui::paint::PAINT_WINDOW.lock();
-                if let Some(window) = win_guard.as_ref() {
-                    let win_rect = Rect::new(
-                        window.x, window.y,
-                        window.width as i32, window.height as i32,
-                    );
-                    if let Some(overlap) = damage.intersection(&win_rect) {
-                        display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
-                    }
-                }
-            }
                     
             // Notepad window (on top of terminal)  this is just for now
             // I guess we have to change this when we bring the dynammic window sizing.
-            {
+            /*{
                 let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref() {
                     let win_rect = Rect::new(
@@ -532,7 +490,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
                     }
                 }
-            }
+            }*/
 
             // Draw the Taskbar over everything else
             let taskbar_rect = Rect::new(0, 0, taskbar.width as i32, taskbar.height as i32);
@@ -556,8 +514,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
 
 pub fn setup_desktop(screen_width: i32, screen_height: i32, bpp: usize) -> WindowManager {
     let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
-    //super::terminal::init_terminal(bpp);
-    super::paint::init_paint(bpp);
+    //super::paint::init_paint(bpp);
     //let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE, bpp);
     //status.render_internal_graphics();
     //wm.add_window(status);
@@ -603,9 +560,11 @@ pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
             
             // Wake up the Compositor to process the click immediately!
             if let Some(waker) = COMPOSITOR_WAKER.lock().take() { waker.wake(); }
-        }
-        else if !packet.left_btn && left_button_was_down {
+        } else if !packet.left_btn && left_button_was_down {
             MOUSE_EVENTS.lock().push(RawMouse::Left_Released(cursor_x, cursor_y));
+            if let Some(waker) = COMPOSITOR_WAKER.lock().take() { waker.wake(); }
+        } else if packet.left_btn && left_button_was_down {
+            MOUSE_EVENTS.lock().push(RawMouse::Left_Pressed(cursor_x, cursor_y));
             if let Some(waker) = COMPOSITOR_WAKER.lock().take() { waker.wake(); }
         }
 
@@ -629,11 +588,11 @@ pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
         MOUSE_Y.store(cursor_y, Ordering::Relaxed);
 
         // Handle left button clicks for paint? idk man, pls work
-        if packet.left_btn {
+        /*if packet.left_btn {
             if crate::gui::paint::point_in_paint_window(cursor_x, cursor_y) {
                 crate::gui::paint::handle_paint_click(cursor_x, cursor_y);
             }
-        }
+        }*/
 
         // 6. Create a damage box for the NEW position (tells Compositor to draw it)
         let new_rect = Rect::new(cursor_x, cursor_y, CURSOR_WIDTH as i32, CURSOR_HEIGHT as i32);
@@ -685,6 +644,7 @@ where
 pub enum RawMouse {
     Left(i32, i32),
     Left_Released(i32, i32),
+    Left_Pressed(i32, i32),
     Right(i32, i32),
     Right_Released(i32, i32),
     Middle(i32, i32),
@@ -698,6 +658,9 @@ pub enum UIEvent {
     
     /// Fired when a mouse button is released
     MouseRelease { x: i32, y: i32, button: RawMouse },
+
+    // Mouse Long Press
+    //MousePressed { x: i32, y: i32, button: RawMouse },
     
     /// Fired when the mouse enters or moves across the component
     MouseMove { x: i32, y: i32 },
