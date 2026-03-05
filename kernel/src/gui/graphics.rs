@@ -132,13 +132,14 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 AppRequest::Terminal => {
                     let initial_terminal = {
                         let global = super::terminal::GUI_TERMINAL.lock();
-                        global.clone();
+                        global.clone()
                     };
                     let mut term_win = Window::with_state(
                         100, 100, 400, 300, 
                         "Terminal", Rgb888::BLACK, taskbar.bpp,
                         AppState::Terminal {
-                            terminal: super::terminal::GuiTerminal::new(),
+                            //terminal: super::terminal::GuiTerminal::new(),
+                            terminal:initial_terminal,
                         }
                     );
                     // Draw the window background and the terminal text
