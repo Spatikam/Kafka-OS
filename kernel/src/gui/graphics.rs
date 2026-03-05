@@ -374,7 +374,23 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     }
                 }
             }*/
-            
+
+            // Check against the Paint window
+            if !fully_covered {
+                let win_guard = crate::gui::paint::PAINT_WINDOW.lock();
+                if let Some(window) = win_guard.as_ref() {
+                    let win_rect = Rect::new(
+                        window.x,
+                        window.y,
+                        window.width as i32,
+                        window.height as i32,
+                    );
+                    if win_rect.contains_rect(&damage) {
+                        fully_covered = true;
+                    }
+                }
+            }
+
             if !fully_covered{
                 let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref(){
@@ -404,8 +420,10 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 let win_guard = crate::gui::terminal::TERMINAL_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref() {
                     let win_rect = Rect::new(
-                        window.x, window.y,
-                        window.width as i32, window.height as i32,
+                        window.x,
+                        window.y,
+                        window.width as i32,
+                        window.height as i32,
                     );
                     if let Some(overlap) = damage.intersection(&win_rect) {
                         // Subtract the notepad area — only blit visible parts
@@ -430,6 +448,21 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     }
                 }
             }*/
+
+            // Blit the Paint window
+            {
+                let win_guard = crate::gui::paint::PAINT_WINDOW.lock();
+                if let Some(window) = win_guard.as_ref() {
+                    let win_rect = Rect::new(
+                        window.x, window.y,
+                        window.width as i32, window.height as i32,
+                    );
+                    if let Some(overlap) = damage.intersection(&win_rect) {
+                        display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
+                    }
+                }
+            }
+                    
             // Notepad window (on top of terminal)  this is just for now
             // I guess we have to change this when we bring the dynammic window sizing.
             {
@@ -466,9 +499,9 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
 }
 
 pub fn setup_desktop(screen_width: i32, screen_height: i32, bpp: usize) -> WindowManager {
-
     let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
     //super::terminal::init_terminal(bpp);
+    super::paint::init_paint(bpp);
     //let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE, bpp);
     //status.render_internal_graphics();
     //wm.add_window(status);
@@ -538,6 +571,13 @@ pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
         // 5. Update the global atomic coordinates for the Compositor
         MOUSE_X.store(cursor_x, Ordering::Relaxed);
         MOUSE_Y.store(cursor_y, Ordering::Relaxed);
+
+        // Handle left button clicks for paint? idk man, pls work
+        if packet.left_btn {
+            if crate::gui::paint::point_in_paint_window(cursor_x, cursor_y) {
+                crate::gui::paint::handle_paint_click(cursor_x, cursor_y);
+            }
+        }
 
         // 6. Create a damage box for the NEW position (tells Compositor to draw it)
         let new_rect = Rect::new(cursor_x, cursor_y, CURSOR_WIDTH as i32, CURSOR_HEIGHT as i32);
