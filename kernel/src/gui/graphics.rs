@@ -451,7 +451,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 }
             }
 
-            /*if !fully_covered{
+            if !fully_covered{
                 let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref(){
                     let win_rect = Rect::new(
@@ -461,7 +461,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         fully_covered = true;
                     }
                 }
-            }*/
+            }
 
             if !fully_covered {
                 display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
@@ -479,7 +479,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     
             // Notepad window (on top of terminal)  this is just for now
             // I guess we have to change this when we bring the dynammic window sizing.
-            /*{
+            {
                 let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref() {
                     let win_rect = Rect::new(
@@ -490,7 +490,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
                     }
                 }
-            }*/
+            }
 
             // Draw the Taskbar over everything else
             let taskbar_rect = Rect::new(0, 0, taskbar.width as i32, taskbar.height as i32);
