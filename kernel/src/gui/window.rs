@@ -13,7 +13,7 @@ use embedded_graphics::{
 
 use crate::gui::graphics::{UIEvent, RawMouse, APP_REQUESTS};
 use crate::{exit_qemu,QemuExitCode};
-
+//use crate::gui::paint::{PAINT_APP};
 use core::convert::Infallible;
 
 // For Application Specific Parameters
@@ -30,6 +30,10 @@ pub enum AppState {
         display: alloc::string::String,
         clear_on_next: bool,
     },
+    Paint {
+        paint: super::paint::PaintApp,
+
+    }
 }
 
 pub struct Window {
@@ -148,8 +152,7 @@ impl Window {
                                         exit_qemu(QemuExitCode::Success);
                                     }
                                 }
-                            }
-                            if self.title == "App Menu" {
+                            } else if self.title == "App Menu" {
                                 if y > 20 {
                                     if y >= 25 && y < 50 {
                                         crate::println!("Launching Terminal...");
@@ -161,7 +164,8 @@ impl Window {
                                         APP_REQUESTS.lock().push(super::graphics::AppRequest::Files);
                                         self.close_btn = true;
                                     } else if y >= 75 && y <= 100 {
-                                        crate::println!("Launching Settings...");
+                                        crate::println!("Launching Paint...");
+                                        APP_REQUESTS.lock().push(super::graphics::AppRequest::Paint);
                                         self.close_btn = true;
                                     } else if y >= 100 && y <= 125 { // Assuming this coordinate range
                                         crate::println!("Launching Calculator...");
@@ -169,8 +173,7 @@ impl Window {
                                         self.close_btn = true;
                                     }
                                 }
-                            }
-                            if self.title == "Files" {
+                            } else if self.title == "Files" {
                                 let mut needs_redraw = false;
                                 // 1. Lock the state, modify the path, but DO NOT draw here!
                                 if let AppState::FileExplorer { ref mut current_path, ref displayed_entries } = self.app_state {
@@ -204,9 +207,10 @@ impl Window {
                                 if needs_redraw {
                                     self.render_file_explorer();
                                 }
-                            }
+                            } else if self.title == "Paint" {
+                                super::paint::handle_paint_click(raw_x, raw_y, self.x, self.y);
 
-                            if self.title == "Calculator" {
+                            } else if self.title == "Calculator" {
                                 let mut needs_redraw = false;
 
                                 if let AppState::Calculator { ref mut display, ref mut clear_on_next } = self.app_state {
@@ -276,6 +280,11 @@ impl Window {
                                 self.drag_y = y;
                             }
                         },
+                        RawMouse::Left_Pressed (raw_x, raw_y) => {
+                            if self.title == "Paint" {
+                                super::paint::handle_paint_click(raw_x, raw_y, self.x, self.y);
+                            }
+                        },
                         _ => {}
                     }
                 },
@@ -313,7 +322,7 @@ impl Window {
         
         Text::new("Terminal", Point::new(10, 40), style).draw(self).unwrap();
         Text::new("Files", Point::new(10, 65), style).draw(self).unwrap();
-        Text::new("Settings", Point::new(10, 90), style).draw(self).unwrap();
+        Text::new("Paint", Point::new(10, 90), style).draw(self).unwrap();
         Text::new("Calculator", Point::new(10, 115), style).draw(self).unwrap();
     }
 

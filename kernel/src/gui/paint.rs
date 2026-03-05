@@ -11,6 +11,7 @@ use embedded_graphics::{
     primitives::{PrimitiveStyle, Rectangle},
 };
 use spin::Mutex;
+use conquer_once::spin::Lazy;
 
 use super::geometry::Rect;
 use super::graphics::{COMPOSITOR_WAKER, report_damage};
@@ -88,12 +89,14 @@ impl CanvasPixel {
 }
 
 // ── Paint ap3plication state ─────────────────────────────────────────
+#[derive(Clone)]
 pub struct PaintApp {
     //canvas: [CanvasPixel; CANVAS_SIZE],
     canvas: alloc::vec::Vec<CanvasPixel>,
     brush_color: CanvasPixel,
     brush_radius: i32, // 0 = single pixel, 1 = 3×3, 2 = 5×5 …
     needs_full_redraw: bool,
+    pub needs_redraw: bool,
 }
 
 impl PaintApp {
@@ -104,10 +107,9 @@ impl PaintApp {
             brush_color: CanvasPixel::from_rgb888(Rgb888::BLACK),
             brush_radius: 1,
             needs_full_redraw: true,
+            needs_redraw: false,
         }
     }
-
-    // ── Public API ──────────────────────────────────────────────────
 
     /// Set the brush colour by palette index.
     pub fn set_color(&mut self, idx: usize) {
@@ -204,25 +206,29 @@ impl PaintApp {
     /// Main render entry point. Decides between full and incremental draw.
     pub fn render_into_window(&mut self, window: &mut Window) {
         self.render_palette(window);
-
-        if self.needs_full_redraw {
+        self.render_full_canvas(window);
+        /*if self.needs_full_redraw {
             self.render_full_canvas(window);
             self.needs_full_redraw = false;
-        }
+        }*/
         // When painting incrementally the caller should use render_patch
         // right after paint() for best performance.
     }
 }
 
 // ── Global statics ──────────────────────────────────────────────────
-//pub static PAINT_APP: Mutex<PaintApp> = Mutex::new(PaintApp::new());
-pub static PAINT_APP: Mutex<Option<PaintApp>> = Mutex::new(None);
-pub static PAINT_WINDOW: Mutex<Option<Window>> = Mutex::new(None);
+pub static PAINT_APP: Lazy<Mutex<PaintApp>> = Lazy::new(|| {
+    Mutex::new(PaintApp::new())
+});
+
+//pub static PAINT_APP: Mutex<Option<PaintApp>> = Mutex::new(None);
+//pub static PAINT_WINDOW: Mutex<Option<Window>> = Mutex::new(None);
 
 // ── Initialisation ──────────────────────────────────────────────────
 
 /// Create the paint window and render its initial chrome.
 /// Call this from `setup_desktop()` in graphics.rs.
+/*
 pub fn init_paint(bpp: usize) {
     let mut win = Window::new(
         PAINT_WIN_X,
@@ -241,14 +247,14 @@ pub fn init_paint(bpp: usize) {
     //     app.render_into_window(&mut win);
     // }
     {
-    let mut app_guard = PAINT_APP.lock();
-    *app_guard = Some(PaintApp::new());
-    let app = app_guard.as_mut().unwrap();
-    app.render_into_window(&mut win);
-}
-
+        let mut app_guard = PAINT_APP.lock();
+        *app_guard = Some(PaintApp::new());
+        let app = app_guard.as_mut().unwrap();
+        app.render_into_window(&mut win);
+    }
     *PAINT_WINDOW.lock() = Some(win);
-}
+} 
+*/
 
 // ── Mouse interaction helpers ───────────────────────────────────────
 
@@ -256,10 +262,10 @@ pub fn init_paint(bpp: usize) {
 /// held down and the cursor is over the paint window.
 ///
 /// `screen_x` / `screen_y` are absolute screen coordinates.
-pub fn handle_paint_click(screen_x: i32, screen_y: i32) {
+pub fn handle_paint_click(screen_x: i32, screen_y: i32, win_x: i32, win_y: i32) {
     // Convert screen coords → window-local coords
-    let local_x = screen_x - PAINT_WIN_X;
-    let local_y = screen_y - PAINT_WIN_Y;
+    let local_x = screen_x - win_x;
+    let local_y = screen_y - win_y;
 
     // Check if click is in the palette bar
     if local_y >= TITLE_BAR_H
@@ -269,13 +275,21 @@ pub fn handle_paint_click(screen_x: i32, screen_y: i32) {
     {
         let idx = (local_x / SWATCH_W) as usize;
         x86_64::instructions::interrupts::without_interrupts(|| {
-            // let mut app = PAINT_APP.lock();
-            let mut guard = PAINT_APP.lock();
-            let app = guard.as_mut().unwrap();
+            let mut app = PAINT_APP.lock();
+            //let mut guard = PAINT_APP.lock();
+            //let app = guard.as_mut().unwrap();
             app.set_color(idx);
 
+            app.needs_redraw = true;
+
+            drop(app);
+
+            if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
+                waker.wake();
+            }
+
             // Re-render palette to update the selection indicator
-            let mut win_guard = PAINT_WINDOW.lock();
+            /*let mut win_guard = PAINT_WINDOW.lock();
             if let Some(window) = win_guard.as_mut() {
                 app.render_palette(window);
             }
@@ -291,7 +305,7 @@ pub fn handle_paint_click(screen_x: i32, screen_y: i32) {
 
             if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
                 waker.wake();
-            }
+            }*/
         });
         return;
     }
@@ -302,10 +316,20 @@ pub fn handle_paint_click(screen_x: i32, screen_y: i32) {
 
     if canvas_x >= 0 && canvas_x < CANVAS_W as i32 && canvas_y >= 0 && canvas_y < CANVAS_H as i32 {
         x86_64::instructions::interrupts::without_interrupts(|| {
-            //let mut app = PAINT_APP.lock();
-            let mut guard = PAINT_APP.lock();
-            let app = guard.as_mut().unwrap();
+            let mut app = PAINT_APP.lock();
+            //let mut guard = PAINT_APP.lock();
+            //let app = guard.as_mut().unwrap();
             app.paint(canvas_x, canvas_y);
+
+            app.needs_redraw = true;
+
+            if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
+                waker.wake();
+            }
+
+            drop(app);
+
+            /*
             let r = app.brush_radius + 1;
 
             let mut win_guard = PAINT_WINDOW.lock();
@@ -326,12 +350,13 @@ pub fn handle_paint_click(screen_x: i32, screen_y: i32) {
             if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
                 waker.wake();
             }
+            */
         });
     }
 }
 
-/// Clear the paint canvas and trigger a full redraw.
-pub fn clear_paint() {
+// Clear the paint canvas and trigger a full redraw.
+/*pub fn clear_paint() {
     x86_64::instructions::interrupts::without_interrupts(|| {
         //let mut app = PAINT_APP.lock();
         let mut guard = PAINT_APP.lock();
@@ -356,13 +381,13 @@ pub fn clear_paint() {
             waker.wake();
         }
     });
-}
+}*/
 
-/// Returns `true` if the given screen coordinate falls within the
-/// paint window's bounds (useful for hit-testing in mouse handler).
-pub fn point_in_paint_window(screen_x: i32, screen_y: i32) -> bool {
+// Returns `true` if the given screen coordinate falls within the
+// paint window's bounds (useful for hit-testing in mouse handler).
+/*pub fn point_in_paint_window(screen_x: i32, screen_y: i32) -> bool {
     screen_x >= PAINT_WIN_X
         && screen_x < PAINT_WIN_X + PAINT_WIN_W as i32
         && screen_y >= PAINT_WIN_Y
         && screen_y < PAINT_WIN_Y + PAINT_WIN_H as i32
-}
+}*/
