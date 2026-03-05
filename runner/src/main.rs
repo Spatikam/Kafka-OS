@@ -8,6 +8,8 @@ fn main() {
     cmd.arg("-display").arg("sdl");
     cmd.arg("-d").arg("int,cpu_reset");
     cmd.arg("-D").arg("/tmp/qemu.log");
+    cmd.arg("-netdev").arg("user,id=net0");
+    cmd.arg("-device").arg("e1000,netdev=net0");
     let mut child = cmd.spawn().unwrap();
     child.wait().unwrap();
 }

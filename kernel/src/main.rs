@@ -19,6 +19,7 @@ use blog_os::gdt;
 use blog_os::elf_loader::ElfLoader;
 use spin::Mutex;
 use blog_os::task::mouse::MouseStream;
+use blog_os::pci;
 use futures_util::StreamExt;
 /*
 use embedded_graphics::{
@@ -95,6 +96,12 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         BootInfoFrameAllocator::init(&boot_info.memory_regions)
     };
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
+    pci::print_pci_devices();
+    blog_os::net::init(&mut frame_allocator, phys_mem_offset);
+    blog_os::net::test_dhcp(); // yeah since i got the dhcp thiingy right, it will first allocare the ip, then followed vt otger steps.
+    blog_os::net::test_arp();
+    blog_os::net::test_dns();
+    blog_os::net::test_tcp_http();
 
     // --- FRAMEBUFFER (replaces VGA fixed **) ---
     // boot_info.framebuffer is now available here for GUI work

@@ -25,7 +25,8 @@ pub mod elf_loader;
 pub mod process;
 pub mod scheduler;
 pub mod gui;
-
+pub mod pci;
+pub mod net;
 pub fn init() {
     gdt::init();
     interrupts::init_idt();
