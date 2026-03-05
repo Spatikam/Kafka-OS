@@ -67,8 +67,8 @@ impl Future for WaitForDamage {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let queue = DAMAGE_QUEUE.lock(); // Adjust crate path as needed
         let clock_ticked = CLOCK_TICK.load(Ordering::Relaxed);
-        
-        if queue.is_empty() && !clock_ticked {
+        let term_dirty = super::terminal::GUI_TERMINAL.lock().needs_redraw;   //random name for some reason.. 
+        if queue.is_empty() && !clock_ticked && !term_dirty {
             // The queue is empty. Register our alarm clock and go to sleep!
             *COMPOSITOR_WAKER.lock() = Some(cx.waker().clone());
             Poll::Pending
@@ -130,11 +130,16 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     wm.add_window(file_win);
                 },
                 AppRequest::Terminal => {
+                    let initial_terminal = {
+                        let global = super::terminal::GUI_TERMINAL.lock();
+                        global.clone()
+                    };
                     let mut term_win = Window::with_state(
                         100, 100, 400, 300, 
                         "Terminal", Rgb888::BLACK, taskbar.bpp,
                         AppState::Terminal {
-                            terminal: super::terminal::GuiTerminal::new(),
+                            //terminal: super::terminal::GuiTerminal::new(),
+                            terminal:initial_terminal,
                         }
                     );
                     // Draw the window background and the terminal text
@@ -142,10 +147,15 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     let mut temp_state = core::mem::replace(&mut term_win.app_state, AppState::None);
                     
                     if let AppState::Terminal { ref mut terminal } = temp_state {
+                        terminal.needs_full_redraw = true;
                         terminal.render_into_window(&mut term_win);
+                        //term_win.app_state = AppState::Terminal { terminal };
+                        term_win.app_state = AppState::Terminal { terminal: terminal.clone() };
+                    }else{
+                        term_win.app_state = temp_state;
                     }
 
-                    term_win.app_state = temp_state;
+                    //term_win.app_state = temp_state;
 
                     wm.add_window(term_win);
                 },
@@ -328,38 +338,83 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         window.x, window.y, window.width as i32, window.height as i32
                     ));
                 }
-            } else if window.title == "Terminal" {
-                let mut global_term_state = super::terminal::GUI_TERMINAL.lock();
-                
-                if global_term_state.needs_redraw {
-                    //for window in &mut wm.windows {
-                    let mut temp_state = core::mem::replace(&mut window.app_state, AppState::None);
-
-                    if let AppState::Terminal { ref mut terminal } = temp_state {
-                        // Did the cursor move, OR was a clear/scroll triggered?
-                        //if terminal.row != global_term_state.row || terminal.col != global_term_state.col || global_term_state.needs_full_redraw {
-                        *terminal = global_term_state.clone();
-                        
-                        // RENDER TO THE REAL WINDOW
-                        terminal.render_into_window(window);
-                        
-                        // Report damage exactly where the window is currently located!
-                        report_damage(Rect::new(
-                            window.x, window.y + 20, window.width as i32, window.height as i32 - 20
-                        ));
-                        
-                        // Reset the global redraw flag now that it has been handled
-                        //global_term_state.needs_full_redraw = false;
-                        global_term_state.needs_redraw = false;
-                        //crate::println!("Term loop {}", window.title);
-                    }
-                    window.app_state = temp_state;
-                    //}
-                }
-            } 
+            }
         }
-        //drop(global_term_state);
-        //drop(global_paint_state);
+        
+        /*if global_term_state.needs_redraw {
+            let snapshot_cells = global_term_state.cells;
+            let snapshot_row = global_term_state.row;
+            let snapshot_col = global_term_state.col;
+            let snapshot_fg = global_term_state.fg;
+            let snapshot_full = global_term_state.needs_full_redraw;
+            global_term_state.needs_redraw = false;
+            global_term_state.needs_full_redraw = false;
+            drop(global_term_state); // Release lock BEFORE rendering
+            for window in &mut wm.windows {
+                let mut temp_state = core::mem::replace(&mut window.app_state, AppState::None);
+
+                if let AppState::Terminal { ref mut terminal } = temp_state {
+                    terminal.cells = 
+                    // Did the cursor move, OR was a clear/scroll triggered?
+                    //if terminal.row != global_term_state.row || terminal.col != global_term_state.col || global_term_state.needs_full_redraw {
+                    *terminal = global_term_state.clone();
+                    
+                    // RENDER TO THE REAL WINDOW
+                    terminal.render_into_window(window);
+                    
+                    // Report damage exactly where the window is currently located!
+                    report_damage(Rect::new(
+                        window.x, window.y + 20, window.width as i32, window.height as i32 - 20
+                    ));
+                    
+                    // Reset the global redraw flag now that it has been handled
+                    //global_term_state.needs_full_redraw = false;
+                    global_term_state.needs_redraw = false;
+                    //crate::println!("Term loop {}", window.title);
+                }
+                window.app_state = temp_state;
+            }
+        }*/
+        
+        let mut global_term_state = super::terminal::GUI_TERMINAL.lock();
+        if global_term_state.needs_redraw {
+            // what if i drop the lock and proceed and then i guess in the fut, push it back again..
+            let snapshot_cells = global_term_state.cells;
+            let snapshot_row = global_term_state.row;
+            let snapshot_col = global_term_state.col;
+            let snapshot_fg = global_term_state.fg;
+            let snapshot_full = global_term_state.needs_full_redraw;
+            // that means reddraw i should keep it false.
+            global_term_state.needs_redraw = false;  
+            global_term_state.needs_full_redraw = false;
+            drop(global_term_state); // Release lock BEFORE rendering
+
+            for window in &mut wm.windows {
+                let is_terminal = matches!(&window.app_state, AppState::Terminal { .. });
+                if !is_terminal { continue; }
+                let temp_state = core::mem::replace(&mut window.app_state, AppState::None);
+
+                if let AppState::Terminal { mut terminal } = temp_state {
+                    // Sync the local terminal from the snapshot
+                    let old_row = terminal.row;
+                    terminal.cells = snapshot_cells;
+                    terminal.row = snapshot_row;
+                    terminal.col = snapshot_col;
+                    terminal.fg = snapshot_fg;
+                    if snapshot_full  || old_row != snapshot_row{
+                        terminal.needs_full_redraw = true;
+                    }
+                    // Render into the WM-owned window
+                    terminal.render_into_window(window);
+                    report_damage(Rect::new(
+                        window.x, window.y + 20,
+                        window.width as i32, window.height as i32 - 20,
+                    ));
+                    // Put state back
+                    window.app_state = AppState::Terminal { terminal };
+                }
+            }
+        }
 
         // 2. Extract all damage rects and instantly unlock the queue
         // so other tasks aren't blocked from reporting new damage.
