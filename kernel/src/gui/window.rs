@@ -34,6 +34,9 @@ pub enum AppState {
     },
     Paint {
         paint: super::paint::PaintApp,
+    },
+    Snake {
+        snake: super::snake::SnakeGame,
     }
 }
 
@@ -173,6 +176,11 @@ impl Window {
                                         APP_REQUESTS.lock().push(crate::gui::graphics::AppRequest::Calculator);
                                         self.close_btn = true;
                                     }
+                                    else if y >= 125 && y <=150{
+                                        crate::println!("Launching Snake gAME");
+                                        APP_REQUESTS.lock().push(crate::gui::graphics::AppRequest::Snake);
+                                        self.close_btn = true;
+                                    }
                                 }
                             } else if self.title == "Files" {
                                 let mut needs_redraw = false;
@@ -272,6 +280,13 @@ impl Window {
                                 if needs_redraw {
                                     self.render_calculator();
                                 }
+                            }else if self.title == "Snake"{
+                                if let AppState::Snake {ref mut snake} = self.app_state{
+                                    if snake.state == super::snake::GameState::GameOver{
+                                        snake.reset();
+                                        self.render_snake();
+                                    }
+                                }
                             }
 
                             if self.width as i32 - 20 <= x && x <= self.width as i32 - 2 && 1 <= y && y <= 19 {
@@ -326,6 +341,7 @@ impl Window {
         Text::new("Files", Point::new(10, 65), style).draw(self).unwrap();
         Text::new("Paint", Point::new(10, 90), style).draw(self).unwrap();
         Text::new("Calculator", Point::new(10, 115), style).draw(self).unwrap();
+        Text::new("Snake",Point::new(10,140),style).draw(self).unwrap();
     }
 
     // File Explorer
@@ -470,6 +486,157 @@ impl Window {
             //}
         }
     }
+    pub fn render_snake(&mut self) {
+        self.render_internal_graphics();
+
+        let text_style = MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE);
+        let bg_color = Rgb888::new(26, 26, 46);
+
+        let game_y = 20i32;
+        let game_w = self.width;
+        let game_h = self.height - 20;
+
+        Rectangle::new(Point::new(0, game_y), Size::new(game_w, game_h))
+            .into_styled(PrimitiveStyle::with_fill(bg_color))
+            .draw(self).unwrap();
+
+        // Clone all data out FIRST to avoid borrow conflicts
+        let (body, food, score, high_score, state) = match &self.app_state {
+            AppState::Snake {  snake } => (
+                snake.body.clone(),
+                snake.food,
+                snake.score,
+                snake.high_score,
+                snake.state,
+            ),
+            _ => return,
+        };
+
+        let cell = 16u32;
+        let grid_y = game_y + 20;
+
+        // Score
+        let score_text = alloc::format!("Score: {}  Hi: {}", score, high_score);
+        Text::new(&score_text, Point::new(5, 35), text_style).draw(self).unwrap();
+
+        // Food
+        Rectangle::new(
+            Point::new((food.x as u32 * cell) as i32, grid_y + (food.y as u32 * cell) as i32),
+            Size::new(cell - 2, cell - 2),
+        )
+        .into_styled(PrimitiveStyle::with_fill(Rgb888::RED))
+        .draw(self).unwrap();
+
+        // Snake
+        for (i, seg) in body.iter().enumerate() {
+            let color = if i == 0 {
+                Rgb888::new(0, 255, 0)
+            } else {
+                Rgb888::new(34, 139, 34)
+            };
+            Rectangle::new(
+                Point::new((seg.x as u32 * cell + 1) as i32, grid_y + (seg.y as u32 * cell + 1) as i32),
+                Size::new(cell - 2, cell - 2),
+            )
+            .into_styled(PrimitiveStyle::with_fill(color))
+            .draw(self).unwrap();
+        }
+
+        // Overlays
+        match state {
+            super::snake::GameState::GameOver => {
+                let msg_style = MonoTextStyle::new(&FONT_8X13, Rgb888::RED);
+                Text::new("GAME OVER", Point::new(60, grid_y + 100), msg_style).draw(self).unwrap();
+                Text::new("Press ENTER to restart", Point::new(20, grid_y + 120), text_style).draw(self).unwrap();
+            }
+            super::snake::GameState::Paused => {
+                Text::new("PAUSED", Point::new(80, grid_y + 100), text_style).draw(self).unwrap();
+            }
+            _ => {}
+        }
+
+        report_damage(Rect::new(
+            self.x, self.y, self.width as i32, self.height as i32
+        ));
+    }
+    // i think i will have rewrite it again (lag issues )
+    pub fn render_snake_partial(&mut self) {
+        let (moved, last_tail, head, old_head, food, score, high_score, state) = match &self.app_state {
+            AppState::Snake { snake } => (
+                snake.moved,
+                snake.last_tail,
+                snake.body.first().copied(),
+                snake.body.get(1).copied(),
+                snake.food,
+                snake.score,
+                snake.high_score,
+                snake.state,
+            ),
+            _ => return,
+        };
+
+        if state != super::snake::GameState::Playing {
+            self.render_snake(); // Full redraw for game over / pause
+            return;
+        }
+
+        if !moved {
+            return;
+        }
+
+        let cell = 16u32;
+        let grid_y = 40i32; // 20 (title bar) + 20 (score area)
+        let bg_color = Rgb888::new(26, 26, 46);
+        let text_style = MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE);
+
+        // 1. Erase old tail
+        if let Some(tail) = last_tail {
+            Rectangle::new(
+                Point::new((tail.x as u32 * cell) as i32, grid_y + (tail.y as u32 * cell) as i32),
+                Size::new(cell, cell),
+            )
+            .into_styled(PrimitiveStyle::with_fill(bg_color))
+            .draw(self).unwrap();
+        }
+
+        if let Some(h) = head {
+            Rectangle::new(
+                Point::new((h.x as u32 * cell + 1) as i32, grid_y + (h.y as u32 * cell + 1) as i32),
+                Size::new(cell - 2, cell - 2),
+            )
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(0, 255, 0)))
+            .draw(self).unwrap();
+        }
+
+        // addition of the old tail i g
+        if let Some(oh) = old_head {
+            Rectangle::new(
+                Point::new((oh.x as u32 * cell + 1) as i32, grid_y + (oh.y as u32 * cell + 1) as i32),
+                Size::new(cell - 2, cell - 2),
+            )
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(34, 139, 34)))
+            .draw(self).unwrap();
+        }
+
+        Rectangle::new(
+            Point::new((food.x as u32 * cell) as i32, grid_y + (food.y as u32 * cell) as i32),
+            Size::new(cell - 2, cell - 2),
+        )
+        .into_styled(PrimitiveStyle::with_fill(Rgb888::RED))
+        .draw(self).unwrap();
+
+        //Updation in the score bar.
+        Rectangle::new(Point::new(0, 20), Size::new(self.width, 20))
+            .into_styled(PrimitiveStyle::with_fill(bg_color))
+            .draw(self).unwrap();
+        let score_text = alloc::format!("Score: {}  Hi: {}", score, high_score);
+        Text::new(&score_text, Point::new(5, 35), text_style).draw(self).unwrap();
+
+        report_damage(Rect::new(
+            self.x, self.y, self.width as i32, self.height as i32
+        ));
+    }
+
 }
 
 impl OriginDimensions for Window {

@@ -54,7 +54,8 @@ pub enum AppRequest {
     Files,
     Terminal,
     Paint,
-    Calculator
+    Calculator,
+    Snake,
 }
 
 pub static APP_REQUESTS: spin::Mutex<alloc::vec::Vec<AppRequest>> = spin::Mutex::new(alloc::vec::Vec::new());
@@ -190,6 +191,17 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
 
                     wm.add_window(paint_win);
                 },
+                AppRequest::Snake =>{
+                    let mut snake_win = Window::with_state(
+                        150,80,330,290,
+                        "Snake",Rgb888::new(26,26,46),taskbar.bpp,
+                        AppState::Snake{
+                            snake:super::snake::SnakeGame::new()
+                        }
+                    );
+                    snake_win.render_snake();
+                    wm.add_window(snake_win);
+                },
                 _ => {} 
             }
         }
@@ -227,7 +239,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                                 // Create a 150x120 window anchored to the left
                                 let mut app_menu = Window::new(
                                     0, taskbar.height as i32, 
-                                    150, 120, 
+                                    150, 150, 
                                     "App Menu", Rgb888::new(40, 40, 40), taskbar.bpp
                                 );
                                 
@@ -414,6 +426,35 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     window.app_state = AppState::Terminal { terminal };
                 }
             }
+        }
+        {
+            let has_snake = wm.windows.iter().any(|w| w.title == "Snake");
+            crate::interrupts::SNAKE_ACTIVE.store(has_snake, Ordering::Relaxed);
+            let scancodes: Vec<u8> = {
+                let mut q = crate::interrupts::SNAKE_SCANCODES.lock();
+                let s = q.clone();
+                q.clear();
+                s
+            };
+            for window in &mut wm.windows {
+                if let AppState::Snake { ref mut snake } = window.app_state {
+                    let old_body_head = snake.body.first().copied();
+                    let old_state = snake.state;
+                    for &sc in &scancodes {
+                        snake.on_key(sc);
+                    }
+                    
+                    snake.tick();
+                    let new_body_head = snake.body.first().copied();
+
+                    if old_state != snake.state{
+                        window.render_snake();
+                    }else if old_body_head != new_body_head{
+                        window.render_snake_partial();
+                    }
+                }
+            }
+
         }
 
         // 2. Extract all damage rects and instantly unlock the queue

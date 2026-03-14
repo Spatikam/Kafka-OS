@@ -7,3 +7,4 @@ pub mod terminal;
 pub mod notepad;
 pub mod taskbar;
 pub mod rtc;
+pub mod snake;

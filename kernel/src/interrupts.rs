@@ -6,11 +6,13 @@ use pic8259::ChainedPics;
 use spin;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
 use crossbeam_queue::ArrayQueue;
-use core::sync::atomic::{AtomicU64,Ordering};
+use core::sync::atomic::{AtomicU64,AtomicBool,Ordering};
 use crate::gui::graphics;
+use alloc::vec::Vec;
 
 pub static TICKS:AtomicU64=AtomicU64::new(0);
-
+pub static SNAKE_SCANCODES: spin::Mutex<alloc::vec::Vec<u8>> = spin::Mutex::new(alloc::vec::Vec::new());
+pub static SNAKE_ACTIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
 
 // --- 1. Constants & Enums ---
 pub const PIC_1_OFFSET: u8 = 32;
@@ -113,8 +115,13 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
         graphics::CLOCK_TICK.store(true, core::sync::atomic::Ordering::Relaxed);
         
         // Wake up the Compositor!
-        if let Some(waker) = crate::gui::graphics::COMPOSITOR_WAKER.lock().take() {
+        /*if let Some(waker) = crate::gui::graphics::COMPOSITOR_WAKER.lock().take() {
             waker.wake();
+        }*/
+        if SNAKE_ACTIVE.load(Ordering::Relaxed)  || ticks % 18 == 0 {
+            if let Some(waker) = crate::gui::graphics::COMPOSITOR_WAKER.lock().take() {
+                waker.wake();
+            }
         }
     }
     unsafe {
@@ -130,6 +137,9 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     let mut port = Port::new(0x60);
     let scancode:u8 = unsafe {port.read()};
     crate::task::keyboard::add_scancode(scancode);
+    if SNAKE_ACTIVE.load(Ordering::Relaxed){
+        SNAKE_SCANCODES.lock().push(scancode);
+    }
     unsafe{
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
     }

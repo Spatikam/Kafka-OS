@@ -48,6 +48,7 @@ const BOOTLOADER_CONFIG: BootloaderConfig = {
     config.mappings.physical_memory = Some(Mapping::Dynamic);
     config.frame_buffer.minimum_framebuffer_height = Some(1080);
     config.frame_buffer.minimum_framebuffer_width = Some(1920);
+    config.kernel_stack_size = 512 * 1024;  //increase the stack size. i think we need to keeep on increasing this stuff unless we stop adding stuff so yeah
     config
 };
 
