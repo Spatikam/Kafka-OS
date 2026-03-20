@@ -81,6 +81,7 @@ impl Future for WaitForDamage {
 }
 
 pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowManager, mut taskbar: Taskbar, screen_width: i32, screen_height: i32) {
+    let mut last_snake_pit: usize = 0;
     loop {
         // 1.
         WaitForDamage.await;
@@ -436,6 +437,10 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 q.clear();
                 s
             };
+            // this should hopefully fix the mouse movment along with snake 
+            let current_pit = PIT_TICKS.load(Ordering::Relaxed);
+            let pit_advanced = current_pit != last_snake_pit;
+            if pit_advanced {last_snake_pit = current_pit;}
             for window in &mut wm.windows {
                 if let AppState::Snake { ref mut snake } = window.app_state {
                     let old_body_head = snake.body.first().copied();
@@ -444,7 +449,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         snake.on_key(sc);
                     }
                     
-                    snake.tick();
+                    if pit_advanced { snake.tick(); }
                     let new_body_head = snake.body.first().copied();
 
                     if old_state != snake.state{
