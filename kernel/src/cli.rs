@@ -1,15 +1,15 @@
 // src/cli.rs
-use crate::{tprint, tprintln};
-use crate::task::keyboard::ScancodeStream;
-use crate::exit_qemu;
 use crate::QemuExitCode;
-use crate::gui::terminal::{self, COLOR_CYAN, COLOR_YELLOW, COLOR_GREEN, COLOR_WHITE, COLOR_RED};
+use crate::exit_qemu;
 use crate::gui::notepad;
-use futures_util::stream::StreamExt;
-use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1, KeyCode};
+use crate::gui::terminal::{self, COLOR_CYAN, COLOR_GREEN, COLOR_RED, COLOR_WHITE, COLOR_YELLOW};
+use crate::task::keyboard::ScancodeStream;
+use crate::{tprint, tprintln};
+use alloc::format;
 use alloc::string::String;
 use alloc::vec::Vec;
-use alloc::format;
+use futures_util::stream::StreamExt;
+use pc_keyboard::{DecodedKey, HandleControl, KeyCode, Keyboard, ScancodeSet1, layouts};
 
 pub async fn run() {
     let mut scancodes = ScancodeStream::new();
@@ -27,7 +27,7 @@ pub async fn run() {
     // we need to track these ourselves for notepad shortcuts, would help use to trigger some func.
     let mut ctrl_pressed = false;
     let mut shift_pressed = false;
-    
+
     print_prompt(&cwd);
 
     while let Some(scancode) = scancodes.next().await {
@@ -46,11 +46,9 @@ pub async fn run() {
 
             // always process key event (keeps keyboard decoder state in sync)
             if let Some(key) = keyboard.process_keyevent(key_event) {
-
-                
                 // if notepad is open, send all keys there instead of the terminal  // yeah this is a bit of conflict
                 // for now if this is open, we can't access the terminal.. we kinda need to do some kind of sharing.
-                // so when we make the stuff dynammic, i will reroute this.. 
+                // so when we make the stuff dynammic, i will reroute this..
                 if notepad::is_active() {
                     // check for escape to close notepad
                     let is_escape = matches!(
@@ -73,7 +71,7 @@ pub async fn run() {
                     } else {
                         notepad::handle_key(key, ctrl_pressed, shift_pressed);
                     }
-                    continue; 
+                    continue;
                 }
                 match key {
                     DecodedKey::Unicode(character) => match character {
@@ -157,7 +155,7 @@ fn execute_command(input: &str, cwd: &mut String) {
 
     match command {
         "help" => tprintln!(
-            "Commands: help version clear echo ls cd cat calc kafkafetch shutdown touch write rm ps"
+            "Commands: help version clear echo ls cd cat calc kafkafetch ifconfig shutdown touch write rm ps"
         ),
 
         "version" => tprintln!("KafkaOS v0.1.0"),
@@ -304,31 +302,49 @@ fn execute_command(input: &str, cwd: &mut String) {
         "calc" => {
             let num1_str = match args.next() {
                 Some(s) => s,
-                None => { tprintln!("Usage: calc <n> <op> <n>"); return; }
+                None => {
+                    tprintln!("Usage: calc <n> <op> <n>");
+                    return;
+                }
             };
             let op = match args.next() {
                 Some(s) => s,
-                None => { tprintln!("Error: Missing operator."); return; }
+                None => {
+                    tprintln!("Error: Missing operator.");
+                    return;
+                }
             };
             let num2_str = match args.next() {
                 Some(s) => s,
-                None => { tprintln!("Usage: calc <n> <op> <n>"); return; }
+                None => {
+                    tprintln!("Usage: calc <n> <op> <n>");
+                    return;
+                }
             };
             let num1: i64 = match num1_str.parse() {
                 Ok(n) => n,
-                Err(_) => { tprintln!("Error: '{}' NaN", num1_str); return; }
+                Err(_) => {
+                    tprintln!("Error: '{}' NaN", num1_str);
+                    return;
+                }
             };
             let num2: i64 = match num2_str.parse() {
                 Ok(n) => n,
-                Err(_) => { tprintln!("Error: '{}' NaN", num2_str); return; }
+                Err(_) => {
+                    tprintln!("Error: '{}' NaN", num2_str);
+                    return;
+                }
             };
             match op {
                 "+" => tprintln!("Result: {}", num1 + num2),
                 "-" => tprintln!("Result: {}", num1 - num2),
                 "*" => tprintln!("Result: {}", num1 * num2),
                 "/" => {
-                    if num2 == 0 { tprintln!("Error: Division by zero!"); }
-                    else { tprintln!("Result: {}", num1 / num2); }
+                    if num2 == 0 {
+                        tprintln!("Error: Division by zero!");
+                    } else {
+                        tprintln!("Result: {}", num1 / num2);
+                    }
                 }
                 "%" => tprintln!("Result: {}", num1 % num2),
                 _ => tprintln!("Error: Unknown op '{}'", op),
@@ -343,6 +359,41 @@ fn execute_command(input: &str, cwd: &mut String) {
 
         "kafkafetch" => print_kafkafetch(),
 
+        "ifconfig" => {
+            if let (Some(mac), Some(ip)) =
+                (crate::net::get_mac_address(), crate::net::get_ip_address())
+            {
+                let rx_count = crate::net::get_rx_count();
+                let tx_count = crate::net::get_tx_count();
+
+                terminal::set_terminal_color(COLOR_CYAN);
+                tprintln!("eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500");
+
+                terminal::set_terminal_color(COLOR_YELLOW);
+                tprintln!(
+                    "        inet {}.{}.{}.{}  netmask 255.255.255.0  broadcast 10.0.2.255",
+                    ip[0],
+                    ip[1],
+                    ip[2],
+                    ip[3]
+                );
+                tprintln!(
+                    "        ether {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}  txqueuelen 1000",
+                    mac[0],
+                    mac[1],
+                    mac[2],
+                    mac[3],
+                    mac[4],
+                    mac[5]
+                );
+                tprintln!("        RX packets {}  bytes {}", rx_count, rx_count * 64);
+                tprintln!("        TX packets {}  bytes {}", tx_count, tx_count * 64);
+            } else {
+                terminal::set_terminal_color(COLOR_RED);
+                tprintln!("eth0: network not initialized");
+            }
+        }
+
         "shutdown" => {
             tprintln!("Shutting down...");
             exit_qemu(QemuExitCode::Success);
@@ -351,7 +402,10 @@ fn execute_command(input: &str, cwd: &mut String) {
         "touch" => {
             let filename = match args.next() {
                 Some(s) => s,
-                None => { tprintln!("Usage: touch <filename>"); return; }
+                None => {
+                    tprintln!("Usage: touch <filename>");
+                    return;
+                }
             };
             let full_path = if filename.starts_with('/') {
                 String::from(filename.trim_start_matches('/'))
@@ -368,7 +422,10 @@ fn execute_command(input: &str, cwd: &mut String) {
         "write" => {
             let filename = match args.next() {
                 Some(s) => s,
-                None => { tprintln!("Usage: write <file> <text>"); return; }
+                None => {
+                    tprintln!("Usage: write <file> <text>");
+                    return;
+                }
             };
             let full_path = if filename.starts_with('/') {
                 String::from(filename.trim_start_matches('/'))
@@ -390,7 +447,10 @@ fn execute_command(input: &str, cwd: &mut String) {
         "rm" => {
             let filename = match args.next() {
                 Some(s) => s,
-                None => { tprintln!("Usage: rm <filename>"); return; }
+                None => {
+                    tprintln!("Usage: rm <filename>");
+                    return;
+                }
             };
             let full_path = if filename.starts_with('/') {
                 String::from(filename.trim_start_matches('/'))
@@ -407,10 +467,10 @@ fn execute_command(input: &str, cwd: &mut String) {
         }
         "notepad" => {
             let bpp = notepad::get_bpp();
-            if let Some(filename) = args.next(){
-                tprintln!("Opening {}",filename);
+            if let Some(filename) = args.next() {
+                tprintln!("Opening {}", filename);
                 notepad::open_notepad_with_file(bpp, filename);
-            }else{
+            } else {
                 tprintln!("Opening Notepad...");
                 notepad::open_notepad(bpp);
             }

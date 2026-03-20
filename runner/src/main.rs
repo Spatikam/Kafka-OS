@@ -8,6 +8,9 @@ fn main() {
     cmd.arg("-display").arg("sdl");
     cmd.arg("-d").arg("int,cpu_reset");
     cmd.arg("-D").arg("/tmp/qemu.log");
+    // --- NETWORKING ---
+    cmd.arg("-netdev").arg("user,id=net0");
+    cmd.arg("-device").arg("rtl8139,netdev=net0,mac=52:54:00:12:34:56");
     let mut child = cmd.spawn().unwrap();
     child.wait().unwrap();
 }
