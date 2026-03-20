@@ -39,7 +39,17 @@ pub enum AppState {
         snake: super::snake::SnakeGame,
     }
 }
-
+#[derive(Copy, Clone, Debug, PartialEq)]
+pub enum ResizeEdge {
+    Top,
+    Bottom,
+    Left,
+    Right,
+    TopLeft,
+    TopRight,
+    BottomLeft,
+    BottomRight,
+}
 pub struct Window {
     pub x: i32,
     pub y: i32,
@@ -54,6 +64,11 @@ pub struct Window {
     pub is_dragging: bool, // is Window being dragged Windows
     pub drag_x: i32,
     pub drag_y: i32,
+    pub is_resizing:bool,
+    pub resize_edge:Option<ResizeEdge>,
+    pub min_width:u32,
+    pub min_height:u32,
+
     pub app_state: AppState,
 }
 
@@ -73,6 +88,10 @@ impl Window {
             is_dragging: false,
             drag_x: x,
             drag_y: y,
+            is_resizing:false,
+            resize_edge:None,
+            min_width:80,
+            min_height:60,
             app_state: AppState::None,
         }
     }
@@ -486,97 +505,218 @@ impl Window {
             //}
         }
     }
+    // ============================================================
+// PASTE THESE INTO window.rs, replacing the existing
+// render_snake() and render_snake_partial() methods on Window.
+// ============================================================
+
     pub fn render_snake(&mut self) {
         self.render_internal_graphics();
 
         let text_style = MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE);
-        let bg_color = Rgb888::new(26, 26, 46);
+        let dim_style  = MonoTextStyle::new(&FONT_8X13, Rgb888::new(120, 120, 140));
+        let bg_color   = Rgb888::new(26, 26, 46);
 
-        let game_y = 20i32;
+        let game_y = 20i32;   // below title bar
         let game_w = self.width;
         let game_h = self.height - 20;
 
+        // Fill game background
         Rectangle::new(Point::new(0, game_y), Size::new(game_w, game_h))
             .into_styled(PrimitiveStyle::with_fill(bg_color))
-            .draw(self).unwrap();
+            .draw(self)
+            .unwrap();
 
-        // Clone all data out FIRST to avoid borrow conflicts
-        let (body, food, score, high_score, state) = match &self.app_state {
-            AppState::Snake {  snake } => (
+        // Clone game data to avoid borrow conflicts
+        let (body, food, score, high_score, state, direction) = match &self.app_state {
+            AppState::Snake { snake } => (
                 snake.body.clone(),
                 snake.food,
                 snake.score,
                 snake.high_score,
                 snake.state,
+                snake.direction,
             ),
             _ => return,
         };
 
         let cell = 16u32;
-        let grid_y = game_y + 20;
+        let grid_y = game_y + 20; // below score bar
 
-        // Score
+        // ── Score bar ───────────────────────────────────────────
         let score_text = alloc::format!("Score: {}  Hi: {}", score, high_score);
-        Text::new(&score_text, Point::new(5, 35), text_style).draw(self).unwrap();
+        Text::new(&score_text, Point::new(5, game_y + 15), text_style)
+            .draw(self)
+            .unwrap();
 
-        // Food
+        // Speed indicator on the right
+        let speed = match score / 50 {
+            0 => "SPD: *",
+            1 => "SPD: **",
+            2 => "SPD: ***",
+            _ => "SPD: ****",
+        };
+        Text::new(speed, Point::new(self.width as i32 - 80, game_y + 15), dim_style)
+            .draw(self)
+            .unwrap();
+
+        // ── Play area border ────────────────────────────────────
+        let grid_w = 20u32 * cell;
+        let grid_h = 15u32 * cell;
         Rectangle::new(
-            Point::new((food.x as u32 * cell) as i32, grid_y + (food.y as u32 * cell) as i32),
-            Size::new(cell - 2, cell - 2),
+            Point::new(0, grid_y - 1),
+            Size::new(grid_w + 2, grid_h + 2),
         )
-        .into_styled(PrimitiveStyle::with_fill(Rgb888::RED))
-        .draw(self).unwrap();
+        .into_styled(PrimitiveStyle::with_stroke(Rgb888::new(60, 60, 90), 1))
+        .draw(self)
+        .unwrap();
 
-        // Snake
+        // ── Food (bright red with a small highlight) ────────────
+        let fx = (food.x as u32 * cell + 1) as i32;
+        let fy = grid_y + (food.y as u32 * cell + 1) as i32;
+        // Outer
+        Rectangle::new(Point::new(fx, fy), Size::new(cell - 2, cell - 2))
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(220, 30, 30)))
+            .draw(self)
+            .unwrap();
+        // Inner highlight (2x2 bright spot)
+        Rectangle::new(Point::new(fx + 2, fy + 2), Size::new(4, 4))
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(255, 120, 120)))
+            .draw(self)
+            .unwrap();
+
+        // ── Snake body (gradient: bright head → dim tail) ───────
+        let body_len = body.len().max(1);
         for (i, seg) in body.iter().enumerate() {
-            let color = if i == 0 {
-                Rgb888::new(0, 255, 0)
+            let sx = (seg.x as u32 * cell + 1) as i32;
+            let sy = grid_y + (seg.y as u32 * cell + 1) as i32;
+
+            if i == 0 {
+                // ── Head: bright green with direction indicator ──
+                Rectangle::new(Point::new(sx, sy), Size::new(cell - 2, cell - 2))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb888::new(50, 255, 50)))
+                    .draw(self)
+                    .unwrap();
+
+                // Draw eyes based on direction
+                let (eye1, eye2) = match direction {
+                    super::snake::Direction::Right => (
+                        Point::new(sx + 9, sy + 3),
+                        Point::new(sx + 9, sy + 9),
+                    ),
+                    super::snake::Direction::Left => (
+                        Point::new(sx + 3, sy + 3),
+                        Point::new(sx + 3, sy + 9),
+                    ),
+                    super::snake::Direction::Up => (
+                        Point::new(sx + 3, sy + 3),
+                        Point::new(sx + 9, sy + 3),
+                    ),
+                    super::snake::Direction::Down => (
+                        Point::new(sx + 3, sy + 9),
+                        Point::new(sx + 9, sy + 9),
+                    ),
+                };
+                // Eyes: 3x3 dark squares
+                Rectangle::new(eye1, Size::new(3, 3))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb888::new(10, 10, 10)))
+                    .draw(self)
+                    .unwrap();
+                Rectangle::new(eye2, Size::new(3, 3))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb888::new(10, 10, 10)))
+                    .draw(self)
+                    .unwrap();
             } else {
-                Rgb888::new(34, 139, 34)
-            };
-            Rectangle::new(
-                Point::new((seg.x as u32 * cell + 1) as i32, grid_y + (seg.y as u32 * cell + 1) as i32),
-                Size::new(cell - 2, cell - 2),
-            )
-            .into_styled(PrimitiveStyle::with_fill(color))
-            .draw(self).unwrap();
+                // ── Body: gradient from bright green to dark green ──
+                let brightness = 200u32.saturating_sub(i as u32 * 140 / body_len as u32) as u8;
+                let g = brightness;
+                let r = brightness / 8; // slight warmth
+                Rectangle::new(Point::new(sx, sy), Size::new(cell - 2, cell - 2))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb888::new(r, g, 20)))
+                    .draw(self)
+                    .unwrap();
+            }
         }
 
-        // Overlays
+        // ── State overlays ──────────────────────────────────────
         match state {
             super::snake::GameState::GameOver => {
-                let msg_style = MonoTextStyle::new(&FONT_8X13, Rgb888::RED);
-                Text::new("GAME OVER", Point::new(60, grid_y + 100), msg_style).draw(self).unwrap();
-                Text::new("Press ENTER to restart", Point::new(20, grid_y + 120), text_style).draw(self).unwrap();
+                // Semi-dark overlay box
+                let overlay_y = grid_y + 80;
+                Rectangle::new(Point::new(30, overlay_y - 15), Size::new(260, 65))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb888::new(15, 15, 30)))
+                    .draw(self)
+                    .unwrap();
+                Rectangle::new(Point::new(30, overlay_y - 15), Size::new(260, 65))
+                    .into_styled(PrimitiveStyle::with_stroke(Rgb888::new(220, 50, 50), 1))
+                    .draw(self)
+                    .unwrap();
+
+                let gameover_style = MonoTextStyle::new(&FONT_8X13, Rgb888::new(255, 60, 60));
+                Text::new("GAME OVER", Point::new(100, overlay_y), gameover_style)
+                    .draw(self)
+                    .unwrap();
+
+                let final_score = alloc::format!("Final Score: {}", score);
+                Text::new(&final_score, Point::new(95, overlay_y + 16), text_style)
+                    .draw(self)
+                    .unwrap();
+
+                Text::new("ENTER to restart", Point::new(85, overlay_y + 35), dim_style)
+                    .draw(self)
+                    .unwrap();
             }
             super::snake::GameState::Paused => {
-                Text::new("PAUSED", Point::new(80, grid_y + 100), text_style).draw(self).unwrap();
+                let overlay_y = grid_y + 90;
+                Rectangle::new(Point::new(60, overlay_y - 15), Size::new(200, 45))
+                    .into_styled(PrimitiveStyle::with_fill(Rgb888::new(15, 15, 30)))
+                    .draw(self)
+                    .unwrap();
+                Rectangle::new(Point::new(60, overlay_y - 15), Size::new(200, 45))
+                    .into_styled(PrimitiveStyle::with_stroke(Rgb888::new(100, 100, 200), 1))
+                    .draw(self)
+                    .unwrap();
+
+                let pause_style = MonoTextStyle::new(&FONT_8X13, Rgb888::new(150, 150, 255));
+                Text::new("PAUSED", Point::new(120, overlay_y), pause_style)
+                    .draw(self)
+                    .unwrap();
+                Text::new("P / ESC to resume", Point::new(82, overlay_y + 20), dim_style)
+                    .draw(self)
+                    .unwrap();
             }
             _ => {}
         }
 
         report_damage(Rect::new(
-            self.x, self.y, self.width as i32, self.height as i32
+            self.x,
+            self.y,
+            self.width as i32,
+            self.height as i32,
         ));
     }
-    // i think i will have rewrite it again (lag issues )
+
     pub fn render_snake_partial(&mut self) {
-        let (moved, last_tail, head, old_head, food, score, high_score, state) = match &self.app_state {
-            AppState::Snake { snake } => (
-                snake.moved,
-                snake.last_tail,
-                snake.body.first().copied(),
-                snake.body.get(1).copied(),
-                snake.food,
-                snake.score,
-                snake.high_score,
-                snake.state,
-            ),
-            _ => return,
-        };
+        let (moved, last_tail, head, old_head, food, score, high_score, state, direction, body_len, just_ate) =
+            match &self.app_state {
+                AppState::Snake { snake } => (
+                    snake.moved,
+                    snake.last_tail,
+                    snake.body.first().copied(),
+                    snake.body.get(1).copied(),
+                    snake.food,
+                    snake.score,
+                    snake.high_score,
+                    snake.state,
+                    snake.direction,
+                    snake.body.len(),
+                    snake.just_ate,
+                ),
+                _ => return,
+            };
 
         if state != super::snake::GameState::Playing {
-            self.render_snake(); // Full redraw for game over / pause
+            self.render_snake();
             return;
         }
 
@@ -588,53 +728,120 @@ impl Window {
         let grid_y = 40i32; // 20 (title bar) + 20 (score area)
         let bg_color = Rgb888::new(26, 26, 46);
         let text_style = MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE);
+        let dim_style  = MonoTextStyle::new(&FONT_8X13, Rgb888::new(120, 120, 140));
+
+        // Track the damage bounding box (only repaint what changed)
+        let mut min_x = self.width as i32;
+        let mut min_y = self.height as i32;
+        let mut max_x = 0i32;
+        let mut max_y = 0i32;
+
+        // Helper closure-style: expand damage region
+        macro_rules! expand_damage {
+            ($px:expr, $py:expr, $pw:expr, $ph:expr) => {
+                let px = $px;
+                let py = $py;
+                if px < min_x { min_x = px; }
+                if py < min_y { min_y = py; }
+                if px + $pw > max_x { max_x = px + $pw; }
+                if py + $ph > max_y { max_y = py + $ph; }
+            };
+        }
 
         // 1. Erase old tail
         if let Some(tail) = last_tail {
-            Rectangle::new(
-                Point::new((tail.x as u32 * cell) as i32, grid_y + (tail.y as u32 * cell) as i32),
-                Size::new(cell, cell),
-            )
-            .into_styled(PrimitiveStyle::with_fill(bg_color))
-            .draw(self).unwrap();
+            let tx = (tail.x as u32 * cell) as i32;
+            let ty = grid_y + (tail.y as u32 * cell) as i32;
+            Rectangle::new(Point::new(tx, ty), Size::new(cell, cell))
+                .into_styled(PrimitiveStyle::with_fill(bg_color))
+                .draw(self)
+                .unwrap();
+            expand_damage!(tx, ty, cell as i32, cell as i32);
         }
 
+        // 2. Draw new head with eyes
         if let Some(h) = head {
-            Rectangle::new(
-                Point::new((h.x as u32 * cell + 1) as i32, grid_y + (h.y as u32 * cell + 1) as i32),
-                Size::new(cell - 2, cell - 2),
-            )
-            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(0, 255, 0)))
-            .draw(self).unwrap();
+            let hx = (h.x as u32 * cell + 1) as i32;
+            let hy = grid_y + (h.y as u32 * cell + 1) as i32;
+            Rectangle::new(Point::new(hx, hy), Size::new(cell - 2, cell - 2))
+                .into_styled(PrimitiveStyle::with_fill(Rgb888::new(50, 255, 50)))
+                .draw(self)
+                .unwrap();
+
+            // Eyes
+            let (eye1, eye2) = match direction {
+                super::snake::Direction::Right => (Point::new(hx + 9, hy + 3), Point::new(hx + 9, hy + 9)),
+                super::snake::Direction::Left  => (Point::new(hx + 3, hy + 3), Point::new(hx + 3, hy + 9)),
+                super::snake::Direction::Up    => (Point::new(hx + 3, hy + 3), Point::new(hx + 9, hy + 3)),
+                super::snake::Direction::Down  => (Point::new(hx + 3, hy + 9), Point::new(hx + 9, hy + 9)),
+            };
+            Rectangle::new(eye1, Size::new(3, 3))
+                .into_styled(PrimitiveStyle::with_fill(Rgb888::new(10, 10, 10)))
+                .draw(self)
+                .unwrap();
+            Rectangle::new(eye2, Size::new(3, 3))
+                .into_styled(PrimitiveStyle::with_fill(Rgb888::new(10, 10, 10)))
+                .draw(self)
+                .unwrap();
+            expand_damage!(hx - 1, hy - 1, cell as i32, cell as i32);
         }
 
-        // addition of the old tail i g
+        // 3. Repaint old head as body segment (gradient index 1)
         if let Some(oh) = old_head {
-            Rectangle::new(
-                Point::new((oh.x as u32 * cell + 1) as i32, grid_y + (oh.y as u32 * cell + 1) as i32),
-                Size::new(cell - 2, cell - 2),
-            )
-            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(34, 139, 34)))
-            .draw(self).unwrap();
+            let ox = (oh.x as u32 * cell + 1) as i32;
+            let oy = grid_y + (oh.y as u32 * cell + 1) as i32;
+            let brightness = 200u32.saturating_sub(140 / body_len.max(1) as u32) as u8;
+            Rectangle::new(Point::new(ox, oy), Size::new(cell - 2, cell - 2))
+                .into_styled(PrimitiveStyle::with_fill(Rgb888::new(brightness / 8, brightness, 20)))
+                .draw(self)
+                .unwrap();
+            expand_damage!(ox - 1, oy - 1, cell as i32, cell as i32);
         }
 
-        Rectangle::new(
-            Point::new((food.x as u32 * cell) as i32, grid_y + (food.y as u32 * cell) as i32),
-            Size::new(cell - 2, cell - 2),
-        )
-        .into_styled(PrimitiveStyle::with_fill(Rgb888::RED))
-        .draw(self).unwrap();
+        // 4. Redraw food (in case tail erased it, or new food spawned)
+        let fx = (food.x as u32 * cell + 1) as i32;
+        let fy = grid_y + (food.y as u32 * cell + 1) as i32;
+        Rectangle::new(Point::new(fx, fy), Size::new(cell - 2, cell - 2))
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(220, 30, 30)))
+            .draw(self)
+            .unwrap();
+        Rectangle::new(Point::new(fx + 2, fy + 2), Size::new(4, 4))
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(255, 120, 120)))
+            .draw(self)
+            .unwrap();
+        expand_damage!(fx - 1, fy - 1, cell as i32, cell as i32);
 
-        //Updation in the score bar.
-        Rectangle::new(Point::new(0, 20), Size::new(self.width, 20))
-            .into_styled(PrimitiveStyle::with_fill(bg_color))
-            .draw(self).unwrap();
-        let score_text = alloc::format!("Score: {}  Hi: {}", score, high_score);
-        Text::new(&score_text, Point::new(5, 35), text_style).draw(self).unwrap();
+        
+        if just_ate {
+            Rectangle::new(Point::new(0, 20), Size::new(self.width, 20))
+                .into_styled(PrimitiveStyle::with_fill(bg_color))
+                .draw(self)
+                .unwrap();
+            let score_text = alloc::format!("Score: {}  Hi: {}", score, high_score);
+            Text::new(&score_text, Point::new(5, 35), text_style)
+                .draw(self)
+                .unwrap();
+            let speed = match score / 50 {
+                0 => "SPD: *",
+                1 => "SPD: **",
+                2 => "SPD: ***",
+                _ => "SPD: ****",
+            };
+            Text::new(speed, Point::new(self.width as i32 - 80, 35), dim_style)
+                .draw(self)
+                .unwrap();
+            expand_damage!(0, 20, self.width as i32, 20);
+        }
 
-        report_damage(Rect::new(
-            self.x, self.y, self.width as i32, self.height as i32
-        ));
+        // 6. Report ONLY the damaged region instead of the whole window
+        if max_x > min_x && max_y > min_y {
+            report_damage(Rect::new(
+                self.x + min_x,
+                self.y + min_y,
+                max_x - min_x,
+                max_y - min_y,
+            ));
+        }
     }
 
 }
