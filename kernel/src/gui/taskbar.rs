@@ -22,12 +22,14 @@ pub struct Taskbar {
     pub buffer: Vec<u8>,
     pub event_queue: Vec<UIEvent>,
     pub last_minute: u8, // NEW: Remember the last drawn minute
+    pub minimized_labels: Vec<(String, usize)>, // (title, window index)
 }
 
 pub enum TaskbarAction {
     None,
     OpenPowerMenu,
     OpenAppMenu,
+    RestoreWindow(usize),
 }
 
 impl Taskbar {
@@ -40,6 +42,7 @@ impl Taskbar {
             buffer: alloc::vec![0; (screen_width * height * bpp as u32) as usize],
             event_queue: Vec::new(),
             last_minute: 60, // impossible minute to force update on boot
+            minimized_labels: Vec::new(),
         }
     }
     
@@ -76,6 +79,17 @@ impl Taskbar {
                     } else if x <= 80 { 
                         //crate::println!("Taskbar: App Menu Clicked!");
                         action = TaskbarAction::OpenAppMenu;
+                    } else{
+                        let mut btn_x = 90i32;
+                        for (title, win_idx) in &self.minimized_labels {
+                            let label_len = if title.len() > 8 { 10 } else { title.len() };
+                            let label_width = (label_len as i32 * 8) + 12;
+                            if x >= btn_x && x < btn_x + label_width && y >= 4 && y <= 26 {
+                                action = TaskbarAction::RestoreWindow(*win_idx);
+                                break;
+                            }
+                            btn_x += label_width + 4;
+                        }
                     }
                 }
             }
@@ -169,6 +183,61 @@ impl Taskbar {
             0, 0, self.width as i32, self.height as i32
         ));
     }
+    /// Draw minimized window labels on the taskbar and store their positions
+    pub fn draw_minimized_windows(&mut self, titles: &[(String, usize)]) {
+        self.minimized_labels = titles.iter().cloned().collect();
+        
+        if titles.is_empty() {
+            return;
+        }
+
+        let btn_style = MonoTextStyle::new(&FONT_8X13, Rgb888::new(200, 200, 200));
+        let mut x_offset = 90i32; // Start after "KafkaOS" label
+
+        for (title, _idx) in titles {
+            // Truncate long titles to 8 chars
+            let label: String = if title.len() > 8 {
+                let mut s = String::from(&title[..8]);
+                s.push_str("..");
+                s
+            } else {
+                title.clone()
+            };
+
+            let label_width = (label.len() as u32 * 8) + 12;
+
+            // Draw button background
+            Rectangle::new(
+                Point::new(x_offset, 4),
+                Size::new(label_width, 22),
+            )
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(60, 60, 70)))
+            .draw(self)
+            .unwrap();
+
+            // Draw border
+            Rectangle::new(
+                Point::new(x_offset, 4),
+                Size::new(label_width, 22),
+            )
+            .into_styled(PrimitiveStyle::with_stroke(Rgb888::new(100, 100, 120), 1))
+            .draw(self)
+            .unwrap();
+
+            // Draw label text
+            Text::new(&label, Point::new(x_offset + 6, 20), btn_style)
+                .draw(self)
+                .unwrap();
+
+            x_offset += label_width as i32 + 4; // gap between buttons
+        }
+
+        // Report damage so the taskbar repaints
+        super::graphics::report_damage(crate::gui::geometry::Rect::new(
+            0, 0, self.width as i32, self.height as i32,
+        ));
+    }
+
 }
 
 // Sakamoto's algorithm to calculate the day of the week

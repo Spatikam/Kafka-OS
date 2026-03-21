@@ -61,6 +61,7 @@ pub struct Window {
     pub buffer: Vec<u8>, // The private memory canvas (4 bytes per pixel for ARGB/XRGB)
     pub event_queue: Vec<UIEvent>, // Event Queue for event handling
     pub close_btn: bool, // Close Button Implementation
+    pub is_minimized:bool,
     pub is_dragging: bool, // is Window being dragged Windows
     pub drag_x: i32,
     pub drag_y: i32,
@@ -85,6 +86,7 @@ impl Window {
             buffer: alloc::vec![0; (width * height * bpp as u32) as usize], // Allocate the exact amount of RAM needed for this specific window
             event_queue: Vec::new(),
             close_btn: false,
+            is_minimized:false,
             is_dragging: false,
             drag_x: x,
             drag_y: y,
@@ -126,6 +128,16 @@ impl Window {
             .draw(self)
             .unwrap();
 
+        //addition of Minimize
+        Rectangle::new(Point::new(self.width as i32 - 40, 0), Size::new(20, 20))
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(200, 180, 0)))
+            .draw(self)
+            .unwrap();
+
+        Rectangle::new(Point::new(self.width as i32 - 36, 13), Size::new(12, 2))
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::BLACK))
+            .draw(self)
+            .unwrap();
         // Drawing the Close Button
         Rectangle::new(Point::new(self.width as i32 - 20, 0), Size::new(20, 20))
             .into_styled(PrimitiveStyle::with_fill(Rgb888::RED))
@@ -310,7 +322,9 @@ impl Window {
 
                             if self.width as i32 - 20 <= x && x <= self.width as i32 - 2 && 1 <= y && y <= 19 {
                                 self.close_btn = true;
-                            } else if 0 <= x && x <= self.width as i32 - 21 && 0 <= y && y <= 20 {
+                            }else if self.width as i32 - 40 <= x  &&  x< self.width as i32 - 20 && 1 <= y && y <= 19{
+                                self.is_minimized = true;
+                            }else if 0 <= x && x <= self.width as i32 - 21 && 0 <= y && y <= 20 {
                                 self.is_dragging = true;
                                 self.drag_x = x;
                                 self.drag_y = y;

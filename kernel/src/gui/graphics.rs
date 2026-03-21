@@ -14,6 +14,7 @@ use super::taskbar::{Taskbar, TaskbarAction};
 
 use spin::Mutex;
 use alloc::vec::Vec;
+use alloc::string::String;
 
 use crate::gui::geometry::Rect; //geometry module
 
@@ -107,6 +108,12 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 true 
             }
         });
+        // i guess putting a for loop inorder to report the damage for minimized window.
+        for window in &wm.windows{
+            if window.is_minimized{
+                report_damage(Rect::new(window.x,window.y,window.width as i32,window.height as i32,));
+            }
+        }
 
         // --- APP LAUNCH PHASE ---
         let requests: Vec<AppRequest> = {
@@ -206,6 +213,22 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 _ => {} 
             }
         }
+        {
+            let minimized_titles: Vec<(String, usize)> = wm.windows.iter()
+                .enumerate()
+                .filter(|(_, w)| w.is_minimized)
+                .map(|(i, w)| (w.title.clone(), i))
+                .collect();
+            let changed = minimized_titles.len() != taskbar.minimized_labels.len() || minimized_titles.iter().zip(taskbar.minimized_labels.iter()).any(|(a, b)| a.0 != b.0 || a.1 != b.1);
+            // so wait, we further have to redraw the thing right, oh okayy yeah got it
+            if changed{
+                let mut rtc = crate::gui::rtc::RTC::new();
+                let mut time = rtc.read_datetime();
+                time.apply_timezone_offset(5,30);
+                taskbar.render_internal_graphics(&time);
+                taskbar.draw_minimized_windows(&minimized_titles);
+            }
+        }
 
         let raw_events: Vec<RawMouse> = {
             let mut queue = MOUSE_EVENTS.lock();
@@ -247,6 +270,12 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                                 app_menu.render_app_menu(); 
                                 wm.add_window(app_menu);
                             },
+                            TaskbarAction::RestoreWindow(idx) =>{
+                                if let Some(window) = wm.windows.get_mut(idx){
+                                    window.is_minimized = false;
+                                    report_damage(Rect::new(window.x,window.y,window.width as i32, window.height as i32,));
+                                }
+                            },
                             TaskbarAction::None => {}
                         }
                         continue; // Skip the windows below!
@@ -254,6 +283,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
 
                     let mut clicked_index = None;
                     for (i, window) in wm.windows.iter_mut().enumerate().rev() {
+                        if window.is_minimized {continue;}
                         if x >= window.x && x < window.x + (window.width as i32) &&
                            y >= window.y && y < window.y + (window.height as i32) 
                         {
@@ -292,6 +322,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 },
                 RawMouse::Left_Pressed (x, y) => {
                     for (i, window) in wm.windows.iter_mut().enumerate().rev() {
+                        if window.is_minimized {continue;}
                         if x >= window.x && x < window.x + (window.width as i32) &&
                            y >= window.y && y < window.y + (window.height as i32) 
                         {
@@ -405,6 +436,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             for window in &mut wm.windows {
                 let is_terminal = matches!(&window.app_state, AppState::Terminal { .. });
                 if !is_terminal { continue; }
+                if window.is_minimized { continue; }
                 let temp_state = core::mem::replace(&mut window.app_state, AppState::None);
 
                 if let AppState::Terminal { mut terminal } = temp_state {
@@ -442,6 +474,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             let pit_advanced = current_pit != last_snake_pit;
             if pit_advanced {last_snake_pit = current_pit;}
             for window in &mut wm.windows {
+                if window.is_minimized { continue; }
                 if let AppState::Snake { ref mut snake } = window.app_state {
                     let old_body_head = snake.body.first().copied();
                     let old_state = snake.state;
@@ -486,6 +519,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             } else {
                 // Check against regular windows (Status, etc.)
                 for window in &wm.windows {
+                    if window.is_minimized {continue;}
                     let win_rect = Rect::new(
                         window.x, window.y,
                         window.width as i32, window.height as i32,
@@ -500,6 +534,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             if !fully_covered{
                 let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref(){
+                    if window.is_minimized {continue;}
                     let win_rect = Rect::new(
                         window.x,window.y, window.width as i32, window.height as i32,
                     );
@@ -513,6 +548,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
             }
             for window in &wm.windows {
+                if window.is_minimized {continue;}
                 let win_rect = Rect::new(
                     window.x, window.y, 
                     window.width as i32, window.height as i32
