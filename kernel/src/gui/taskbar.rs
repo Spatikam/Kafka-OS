@@ -60,7 +60,9 @@ impl Taskbar {
         // ONLY render if the minute has actually changed!
         if time.minute != self.last_minute {
             self.last_minute = time.minute;
-            self.render_internal_graphics(&time); 
+            self.render_internal_graphics(&time);
+            let crappy_bug_man = self.minimized_labels.clone();
+            self.draw_minimized_windows(&crappy_bug_man); 
         }
     }
 
