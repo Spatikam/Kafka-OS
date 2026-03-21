@@ -109,9 +109,12 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             }
         });
         // i guess putting a for loop inorder to report the damage for minimized window.
-        for window in &wm.windows{
-            if window.is_minimized{
+        for window in &mut wm.windows{
+            if window.is_minimized && !window.was_minimized{
                 report_damage(Rect::new(window.x,window.y,window.width as i32,window.height as i32,));
+                window.was_minimized = true;
+            } else if !window.is_minimized && window.was_minimized{
+                window.was_minimized = false;
             }
         }
 

@@ -62,6 +62,7 @@ pub struct Window {
     pub event_queue: Vec<UIEvent>, // Event Queue for event handling
     pub close_btn: bool, // Close Button Implementation
     pub is_minimized:bool,
+    pub was_minimized: bool,
     pub is_dragging: bool, // is Window being dragged Windows
     pub drag_x: i32,
     pub drag_y: i32,
@@ -87,6 +88,7 @@ impl Window {
             event_queue: Vec::new(),
             close_btn: false,
             is_minimized:false,
+            was_minimized: false,
             is_dragging: false,
             drag_x: x,
             drag_y: y,
