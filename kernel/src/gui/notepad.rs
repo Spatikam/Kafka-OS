@@ -1171,5 +1171,5 @@ pub fn get_bpp() -> usize {
     } else {
         3 // default fallback, since, we three sincked to 3 so yeah it should work !!
     }*/
-    4
+    3
 }
