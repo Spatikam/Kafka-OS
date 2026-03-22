@@ -4,6 +4,8 @@ use embedded_graphics::{
     pixelcolor::Rgb888,
     prelude::*,
     primitives::{Triangle, Rectangle, Circle, PrimitiveStyle, PrimitiveStyleBuilder, Line, Polyline},
+    mono_font::{ascii::FONT_10X20, MonoTextStyle},
+    text::Text,
 };
 use crate::task::mouse::MousePacket;
 use crate::task::mouse::MouseStream; 
@@ -388,40 +390,6 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             }
         }
         
-        /*if global_term_state.needs_redraw {
-            let snapshot_cells = global_term_state.cells;
-            let snapshot_row = global_term_state.row;
-            let snapshot_col = global_term_state.col;
-            let snapshot_fg = global_term_state.fg;
-            let snapshot_full = global_term_state.needs_full_redraw;
-            global_term_state.needs_redraw = false;
-            global_term_state.needs_full_redraw = false;
-            drop(global_term_state); // Release lock BEFORE rendering
-            for window in &mut wm.windows {
-                let mut temp_state = core::mem::replace(&mut window.app_state, AppState::None);
-
-                if let AppState::Terminal { ref mut terminal } = temp_state {
-                    terminal.cells = 
-                    // Did the cursor move, OR was a clear/scroll triggered?
-                    //if terminal.row != global_term_state.row || terminal.col != global_term_state.col || global_term_state.needs_full_redraw {
-                    *terminal = global_term_state.clone();
-                    
-                    // RENDER TO THE REAL WINDOW
-                    terminal.render_into_window(window);
-                    
-                    // Report damage exactly where the window is currently located!
-                    report_damage(Rect::new(
-                        window.x, window.y + 20, window.width as i32, window.height as i32 - 20
-                    ));
-                    
-                    // Reset the global redraw flag now that it has been handled
-                    //global_term_state.needs_full_redraw = false;
-                    global_term_state.needs_redraw = false;
-                    //crate::println!("Term loop {}", window.title);
-                }
-                window.app_state = temp_state;
-            }
-        }*/
         
         let mut global_term_state = super::terminal::GUI_TERMINAL.lock();
         if global_term_state.needs_redraw {
@@ -597,15 +565,42 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
     }
 }
 
+pub fn render_splash_screen(display: &mut FrameBufferDisplay, screen_width: i32, screen_height: i32) {
+    // 1. Clear the entire screen to a solid background color (e.g., Deep Gray or Black)
+    let bg_style = PrimitiveStyle::with_fill(Rgb888::new(30, 30, 30));
+    let _ = Rectangle::new(Point::new(0, 0), Size::new(screen_width as u32, screen_height as u32))
+        .into_styled(bg_style)
+        .draw(display);
+
+    // 2. Prepare the OS Title Text
+    let text_style = MonoTextStyle::new(&FONT_10X20, Rgb888::WHITE);
+    let title = "KafkaOS";
+    
+    // 3. Mathematical Centering!
+    // Assuming FONT_10X20 means characters are 10px wide and 20px tall.
+    let text_width = (title.len() as u32 * 10) as i32; 
+    let text_height = 20; 
+    
+    let center_x = (screen_width - text_width) / 2;
+    let center_y = (screen_height - text_height) / 2;
+
+    // 4. Draw the text exactly in the middle of the screen
+    let _ = Text::new(title, Point::new(center_x, center_y), text_style).draw(display);
+
+    // 5. Force the framebuffer to update (if your display requires a manual flush)
+    // display.flush(); 
+
+    // 6. The Boot Delay
+    // We use a busy-wait spin loop to freeze the screen for a moment.
+    // Tweak the 50_000_000 number higher or lower depending on your CPU speed!
+    for _ in 0..10_000_000 {
+        core::hint::spin_loop();
+    }
+}
+
 pub fn setup_desktop(screen_width: i32, screen_height: i32, bpp: usize) -> WindowManager {
     let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
-    //super::paint::init_paint(bpp);
-    //let mut status = Window::new(550, 50, 200, 150, "Status", Rgb888::BLUE, bpp);
-    //status.render_internal_graphics();
-    //wm.add_window(status);
-    //let mut status2 = Window::new(100, 50, 200, 150, "File", Rgb888::RED, bpp);
-    //status2.render_internal_graphics();
-    //wm.add_window(status2);
+
     report_damage(Rect::new(0, 0, screen_width, screen_height));
 
     wm

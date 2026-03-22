@@ -36,7 +36,7 @@ use embedded_graphics::{
 use blog_os::process;
 
 use blog_os::gui::buffer::FrameBufferDisplay;
-use blog_os::gui::{window::{Window, WindowManager}, graphics::{setup_desktop, activate_mouse, compositor_task}};
+use blog_os::gui::{window::{Window, WindowManager}, graphics::{render_splash_screen, setup_desktop, activate_mouse, compositor_task}};
 
 static RAM_DISK: &[u8] = include_bytes!("../disk.tar");
 
@@ -135,6 +135,9 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     //crate::println!("width:{width}, height: {height}");
     unsafe {
         if let Some(display) = &mut *ptr {
+
+            render_splash_screen(display, width, height); // splash screen
+
             // Prepare the off-screen windows in standard RAM
             let wm = setup_desktop(width, height, display.info.bytes_per_pixel);
 
