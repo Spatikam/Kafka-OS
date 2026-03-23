@@ -574,7 +574,7 @@ pub fn render_splash_screen(display: &mut FrameBufferDisplay, screen_width: i32,
 
     // 2. Prepare the OS Title Text
     let text_style = MonoTextStyle::new(&FONT_10X20, Rgb888::WHITE);
-    let title = "KafkaOS";
+    let title = "KafkaOS:A Memory Safe x86_64 Microkernel Architecture";
     
     // 3. Mathematical Centering!
     // Assuming FONT_10X20 means characters are 10px wide and 20px tall.
