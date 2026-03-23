@@ -84,6 +84,34 @@ impl Future for WaitForDamage {
 }
 
 pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowManager, mut taskbar: Taskbar, screen_width: i32, screen_height: i32) {
+    // Pre-render the desktop gradient into a buffer (once!)
+    let bg_bpp = display.info.bytes_per_pixel;
+    let bg_width = screen_width as usize;
+    let bg_height = screen_height as usize;
+    let mut bg_buffer = alloc::vec![0u8; bg_width * bg_height * bg_bpp];
+
+    let (r1, g1, b1): (i32, i32, i32) = (10, 10, 40);    // Dark navy top
+    let (r2, g2, b2): (i32, i32, i32) = (0, 128, 128);    // Teal bottom
+
+    for y in 0..bg_height {
+        let t = y as i32;
+        let r = (r1 + (r2 - r1) * t / screen_height) as u8;
+        let g = (g1 + (g2 - g1) * t / screen_height) as u8;
+        let b = (b1 + (b2 - b1) * t / screen_height) as u8;
+
+        for x in 0..bg_width {
+            let idx = (y * bg_width + x) * bg_bpp;
+            if idx + 2 < bg_buffer.len() {
+                // BGR order (matching your framebuffer format)
+                bg_buffer[idx] = b;
+                bg_buffer[idx + 1] = g;
+                bg_buffer[idx + 2] = r;
+                if bg_bpp == 4 {
+                    bg_buffer[idx + 3] = 0;
+                }
+            }
+        }
+    }
     let mut last_snake_pit: usize = 0;
     loop {
         // 1.
@@ -516,7 +544,8 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             }
 
             if !fully_covered {
-                display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
+                //display.fill_rect(&damage, Rgb888::new(0, 128, 128)); // A nice teal background
+                display.blit_bg(&damage, &bg_buffer, bg_width);
             }
             for window in &wm.windows {
                 if window.is_minimized {continue;}

@@ -81,6 +81,29 @@ impl FrameBufferDisplay {
             .into_styled(PrimitiveStyle::with_fill(color))
             .draw(self);
     }
+    /// Blit a region from a pre-rendered background buffer to the screen
+    pub fn blit_bg(&mut self, rect: &Rect, bg_buffer: &[u8], bg_width: usize) {
+        let bpp = self.info.bytes_per_pixel;
+        let stride = self.info.stride;
+
+        for row_offset in 0..rect.height {
+            let screen_y = (rect.y + row_offset) as usize;
+            let screen_x = rect.x as usize;
+            let copy_bytes = rect.width as usize * bpp;
+
+            let screen_start = (screen_y * stride + screen_x) * bpp;
+            let screen_end = screen_start + copy_bytes;
+
+            let bg_start = (screen_y * bg_width + screen_x) * bpp;
+            let bg_end = bg_start + copy_bytes;
+
+            if screen_end <= self.framebuffer.len() && bg_end <= bg_buffer.len() {
+                self.framebuffer[screen_start..screen_end]
+                    .copy_from_slice(&bg_buffer[bg_start..bg_end]);
+            }
+        }
+    }
+
 }
 
 impl OriginDimensions for FrameBufferDisplay {
