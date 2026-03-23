@@ -145,6 +145,9 @@ impl Window {
             .into_styled(PrimitiveStyle::with_fill(Rgb888::RED))
             .draw(self)
             .unwrap();
+        let close_style = MonoTextStyle::new(&FONT_8X13,Rgb888::WHITE);
+        Text::new("X",Point::new(self.width as i32 - 15,14),close_style).draw(self).unwrap();
+
 
         // Draw Border
         Rectangle::new(Point::zero(), Size::new(self.width, self.height))
