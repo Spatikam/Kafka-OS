@@ -3,21 +3,21 @@
 // GUI Terminal Emulator for KafkaOS — Compositor-Compatible
 // v3: Only re-renders changed rows for speed. No flicker.
 
+use core::fmt;
 use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::{Point, Size},
-    mono_font::{ascii::FONT_8X13, MonoTextStyle},
+    mono_font::{MonoTextStyle, ascii::FONT_8X13},
     pixelcolor::Rgb888,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
     text::Text,
 };
 use spin::Mutex;
-use core::fmt;
 
-use super::window::Window;
 use super::geometry::Rect;
-use super::graphics::{report_damage, COMPOSITOR_WAKER};
+use super::graphics::{COMPOSITOR_WAKER, report_damage};
+use super::window::Window;
 
 // kind of sets eveyrthing up
 pub const TERM_WIN_X: i32 = 100;
@@ -34,7 +34,6 @@ const PAD: i32 = 4;
 const TERM_COLS: usize = 48;
 const TERM_ROWS: usize = 20;
 
-
 #[derive(Copy, Clone, PartialEq)]
 pub struct TermCell {
     ch: u8,
@@ -43,7 +42,10 @@ pub struct TermCell {
 
 impl TermCell {
     const fn blank() -> Self {
-        Self { ch: b' ', fg: COLOR_GREEN }
+        Self {
+            ch: b' ',
+            fg: COLOR_GREEN,
+        }
     }
 }
 
@@ -55,12 +57,12 @@ pub const COLOR_RED: u8 = 4;
 
 fn palette(idx: u8) -> Rgb888 {
     match idx {
-        COLOR_GREEN  => Rgb888::new(0, 255, 0),
-        COLOR_CYAN   => Rgb888::new(0, 255, 255),
+        COLOR_GREEN => Rgb888::new(0, 255, 0),
+        COLOR_CYAN => Rgb888::new(0, 255, 255),
         COLOR_YELLOW => Rgb888::new(255, 255, 0),
-        COLOR_WHITE  => Rgb888::WHITE,
-        COLOR_RED    => Rgb888::new(255, 80, 80),
-        _            => Rgb888::new(0, 255, 0),
+        COLOR_WHITE => Rgb888::WHITE,
+        COLOR_RED => Rgb888::new(255, 80, 80),
+        _ => Rgb888::new(0, 255, 0),
     }
 }
 
@@ -83,7 +85,7 @@ impl GuiTerminal {
             row: 0,
             fg: COLOR_GREEN,
             prev_row: 0,
-            needs_full_redraw: true, 
+            needs_full_redraw: true,
             needs_redraw: false,
         }
     }
@@ -100,7 +102,10 @@ impl GuiTerminal {
                 if self.col >= TERM_COLS {
                     self.new_line();
                 }
-                self.cells[self.row][self.col] = TermCell { ch: byte, fg: self.fg };
+                self.cells[self.row][self.col] = TermCell {
+                    ch: byte,
+                    fg: self.fg,
+                };
                 self.col += 1;
             }
         }
@@ -256,7 +261,7 @@ pub fn _tprint(args: fmt::Arguments) {
         }
         */
     });
-    if let Some(waker) = COMPOSITOR_WAKER.lock().take(){
+    if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
         waker.wake();
     }
 }
@@ -298,7 +303,7 @@ pub fn clear_terminal() {
     });
 }
 
-// will be used in cli.rs 
+// will be used in cli.rs
 #[macro_export]
 macro_rules! tprint {
     ($($arg:tt)*) => ({

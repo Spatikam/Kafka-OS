@@ -1,11 +1,10 @@
 // src/fs.rs
-use alloc::vec::Vec;
-use alloc::string::{String,ToString};
-use core::str;
-use conquer_once::spin::OnceCell;
-use spin::Mutex;
 use alloc::collections::BTreeMap;
-
+use alloc::string::{String, ToString};
+use alloc::vec::Vec;
+use conquer_once::spin::OnceCell;
+use core::str;
+use spin::Mutex;
 
 pub static FILESYSTEM: OnceCell<Mutex<OverlayFileSystem>> = OnceCell::uninit();
 pub struct OverlayFileSystem<'a> {
@@ -58,11 +57,11 @@ impl<'a> OverlayFileSystem<'a> {
         }
         list
     }
-    pub fn remove_files(&mut self,name:&str) -> Result<(),&str>{
-        if self.ram_files.remove(name).is_some(){
+    pub fn remove_files(&mut self, name: &str) -> Result<(), &str> {
+        if self.ram_files.remove(name).is_some() {
             return Ok(());
         }
-        if self.tar_fs.read_file(name).is_some(){
+        if self.tar_fs.read_file(name).is_some() {
             return Err("Cannot delete read only files"); // so  assume that i store all the important files needed for the system, that is what i meant by read only
         }
         Err("File not found")
@@ -78,10 +77,12 @@ impl<'a> TarFileSystem<'a> {
     pub fn list_files(&self) -> Vec<String> {
         let mut files = Vec::new();
         let mut ptr = 0;
-        
+
         while ptr + 512 < self.data.len() {
             let header = &self.data[ptr..ptr + 512];
-            if header[0] == 0 { break; }
+            if header[0] == 0 {
+                break;
+            }
 
             let name = parse_string(&header[0..100]);
             let size = parse_octal(&header[124..136]);
@@ -100,13 +101,15 @@ impl<'a> TarFileSystem<'a> {
         let mut ptr = 0;
         while ptr + 512 < self.data.len() {
             let header = &self.data[ptr..ptr + 512];
-            if header[0] == 0 { break; }
+            if header[0] == 0 {
+                break;
+            }
 
             let name = parse_string(&header[0..100]);
             let size = parse_octal(&header[124..136]);
 
             if name.trim() == target_name.trim() {
-                return Some(&self.data[ptr + 512 .. ptr + 512 + size as usize]);
+                return Some(&self.data[ptr + 512..ptr + 512 + size as usize]);
             }
 
             let data_blocks = (size + 511) / 512;
@@ -118,13 +121,14 @@ impl<'a> TarFileSystem<'a> {
 
 // Helper: Convert raw bytes to a Rust string, removing nulls
 fn parse_string(bytes: &[u8]) -> &str {
-    str::from_utf8(bytes)
-        .unwrap_or("")
-        .trim_matches('\0')
+    str::from_utf8(bytes).unwrap_or("").trim_matches('\0')
 }
 
 // Helper: Convert Octal ASCII ("000014") to number (12)
 fn parse_octal(bytes: &[u8]) -> u64 {
-    let s = str::from_utf8(bytes).unwrap_or("0").trim_matches('\0').trim();
+    let s = str::from_utf8(bytes)
+        .unwrap_or("0")
+        .trim_matches('\0')
+        .trim();
     u64::from_str_radix(s, 8).unwrap_or(0)
 }

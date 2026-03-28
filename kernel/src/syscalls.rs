@@ -1,10 +1,10 @@
 // src/syscalls.rs
 
+use crate::gdt;
+use core::arch::naked_asm;
+use x86_64::VirtAddr;
 use x86_64::registers::model_specific::{Efer, EferFlags, LStar, SFMask, Star};
 use x86_64::registers::rflags::RFlags;
-use x86_64::VirtAddr;
-use core::arch::naked_asm;
-use crate::gdt;
 
 // Make sure your interrupts.rs exposes this as public!
 // If it's a OnceCell, we might need .get() below.
@@ -39,9 +39,9 @@ extern "C" fn syscall_handler() {
         naked_asm!(
             "mov [{user_stack_scratch}], rsp",      // Save User Stack
             "lea rsp, [{syscall_stack} + {stack_size}]", // Switch to Kernel Stack
-            
-            "push r11", "push rcx", "push rbp", "push rdi", "push rsi", 
-            "push rdx", "push r8",  "push r9",  "push r10", "push r12", 
+
+            "push r11", "push rcx", "push rbp", "push rdi", "push rsi",
+            "push rdx", "push r8",  "push r9",  "push r10", "push r12",
             "push r13", "push r14", "push r15",
 
             // --- ARGUMENT SHUFFLE  ---
@@ -50,11 +50,11 @@ extern "C" fn syscall_handler() {
             "mov rdx, rsi",   // Arg2 -> RDX
             "mov rsi, rdi",   // Arg1 -> RSI
             "mov rdi, rax",   // ID   -> RDI
-            
+
             "call {rust_handler}",
 
-            "pop r15", "pop r14", "pop r13", "pop r12", "pop r10", 
-            "pop r9",  "pop r8",  "pop rdx", "pop rsi", "pop rdi", 
+            "pop r15", "pop r14", "pop r13", "pop r12", "pop r10",
+            "pop r9",  "pop r8",  "pop rdx", "pop rsi", "pop rdi",
             "pop rbp", "pop rcx", "pop r11",
 
             "mov rsp, [{user_stack_scratch}]",      // Restore User Stack
@@ -85,16 +85,16 @@ extern "C" fn wrapped_syscall_handler(id: u64, arg1: u64, arg2: u64) -> u64 {
         // SYSCALL 2: READ CHAR
         // Note: This requires your KEYBOARD_QUEUE to be accessible.
         // If it's intricate, we can return 0 for now to test printing first.
-        2 => {
-            0 
-        }
+        2 => 0,
 
         // SYSCALL 3: SHUTDOWN
         3 => {
             crate::println!("SYSCALL: Shutting down...");
             use x86_64::instructions::port::Port;
             let mut port = Port::new(0xf4);
-            unsafe { port.write(0x10 as u32); }
+            unsafe {
+                port.write(0x10 as u32);
+            }
             0
         }
 
