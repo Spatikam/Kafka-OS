@@ -9,11 +9,19 @@ pub struct Rect {
 
 impl Rect {
     pub fn new(x: i32, y: i32, width: i32, height: i32) -> Self {
-        Self { x, y, width, height }
+        Self {
+            x,
+            y,
+            width,
+            height,
+        }
     }
-    // fix for the tearing when wrting it so yeah 
+    // fix for the tearing when wrting it so yeah
     pub fn contains_rect(&self, other: &Rect) -> bool {
-        other.x >= self.x&& other.y >= self.y && (other.x + other.width) <= (self.x + self.width) && (other.y + other.height) <= (self.y + self.height)
+        other.x >= self.x
+            && other.y >= self.y
+            && (other.x + other.width) <= (self.x + self.width)
+            && (other.y + other.height) <= (self.y + self.height)
     }
 
     /// Calculates the exact overlapping rectangle between two rects.
@@ -21,7 +29,7 @@ impl Rect {
     pub fn intersection(&self, other: &Rect) -> Option<Rect> {
         let x1 = self.x.max(other.x);
         let y1 = self.y.max(other.y);
-        
+
         let self_x2 = self.x + self.width;
         let self_y2 = self.y + self.height;
         let other_x2 = other.x + other.width;
@@ -64,15 +72,30 @@ impl Rect {
         }
         // Bottom strip
         if ovr_bottom < self_bottom {
-            result.push(Rect::new(self.x, ovr_bottom, self.width, self_bottom - ovr_bottom));
+            result.push(Rect::new(
+                self.x,
+                ovr_bottom,
+                self.width,
+                self_bottom - ovr_bottom,
+            ));
         }
         // Left strip (between top and bottom of overlap)
         if overlap.x > self.x {
-            result.push(Rect::new(self.x, overlap.y, overlap.x - self.x, overlap.height));
+            result.push(Rect::new(
+                self.x,
+                overlap.y,
+                overlap.x - self.x,
+                overlap.height,
+            ));
         }
         // Right strip (between top and bottom of overlap)
         if ovr_right < self_right {
-            result.push(Rect::new(ovr_right, overlap.y, self_right - ovr_right, overlap.height));
+            result.push(Rect::new(
+                ovr_right,
+                overlap.y,
+                self_right - ovr_right,
+                overlap.height,
+            ));
         }
 
         result

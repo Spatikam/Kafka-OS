@@ -6,25 +6,25 @@
 #![test_runner(crate::test_runner)]
 #![reexport_test_harness_main = "test_main"]
 
-
 extern crate alloc;
 use core::panic::PanicInfo;
 
-
 pub mod allocator;
+pub mod cli;
+pub mod elf_loader;
+pub mod fs;
 pub mod gdt;
+pub mod gui;
 pub mod interrupts;
 pub mod memory;
-pub mod serial;
-pub mod task;
-pub mod vga_buffer;
-pub mod cli;
-pub mod syscalls;
-pub mod fs;
-pub mod elf_loader;
+pub mod net;
 pub mod process;
 pub mod scheduler;
-pub mod gui;
+pub mod serial;
+pub mod syscalls;
+pub mod task;
+pub mod util;
+pub mod vga_buffer;
 
 pub fn init() {
     gdt::init();
@@ -87,9 +87,9 @@ pub fn hlt_loop() -> ! {
 
 // NEW
 #[cfg(test)]
-use bootloader_api::{BootInfo, entry_point, BootloaderConfig};
-#[cfg(test)]
 use bootloader_api::config::Mapping;
+#[cfg(test)]
+use bootloader_api::{BootInfo, BootloaderConfig, entry_point};
 
 #[cfg(test)]
 const TEST_BOOTLOADER_CONFIG: BootloaderConfig = {

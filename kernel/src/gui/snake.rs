@@ -188,18 +188,26 @@ impl SnakeGame {
 
         let head = self.body[0];
         let new_head = match self.direction {
-            Direction::Up => Point { x: head.x, y: head.y - 1 },
-            Direction::Down => Point { x: head.x, y: head.y + 1 },
-            Direction::Left => Point { x: head.x - 1, y: head.y },
-            Direction::Right => Point { x: head.x + 1, y: head.y },
+            Direction::Up => Point {
+                x: head.x,
+                y: head.y - 1,
+            },
+            Direction::Down => Point {
+                x: head.x,
+                y: head.y + 1,
+            },
+            Direction::Left => Point {
+                x: head.x - 1,
+                y: head.y,
+            },
+            Direction::Right => Point {
+                x: head.x + 1,
+                y: head.y,
+            },
         };
 
         // Wall collision
-        if new_head.x < 0
-            || new_head.x >= GRID_COLS
-            || new_head.y < 0
-            || new_head.y >= GRID_ROWS
-        {
+        if new_head.x < 0 || new_head.x >= GRID_COLS || new_head.y < 0 || new_head.y >= GRID_ROWS {
             self.game_over();
             return;
         }

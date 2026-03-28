@@ -8,8 +8,8 @@ use core::{
 
 pub mod executor;
 pub mod keyboard;
-pub mod simple_executor;
 pub mod mouse;
+pub mod simple_executor;
 
 pub struct Task {
     id: TaskId,

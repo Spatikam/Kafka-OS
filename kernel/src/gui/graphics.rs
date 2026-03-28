@@ -1,28 +1,30 @@
+use super::taskbar::{Taskbar, TaskbarAction};
+use super::window::{AppState, Window, WindowManager};
+use crate::gui::buffer::FrameBufferDisplay;
+use crate::task::mouse::MousePacket;
+use crate::task::mouse::MouseStream;
 use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::Point,
+    mono_font::{MonoTextStyle, ascii::FONT_10X20},
     pixelcolor::Rgb888,
     prelude::*,
-    primitives::{Triangle, Rectangle, Circle, PrimitiveStyle, PrimitiveStyleBuilder, Line, Polyline},
-    mono_font::{ascii::FONT_10X20, MonoTextStyle},
+    primitives::{
+        Circle, Line, Polyline, PrimitiveStyle, PrimitiveStyleBuilder, Rectangle, Triangle,
+    },
     text::Text,
 };
-use crate::task::mouse::MousePacket;
-use crate::task::mouse::MouseStream; 
 use futures_util::stream::StreamExt;
-use super::window::{Window, WindowManager, AppState};
-use crate::gui::buffer::FrameBufferDisplay;
-use super::taskbar::{Taskbar, TaskbarAction};
 
-use spin::Mutex;
-use alloc::vec::Vec;
 use alloc::string::String;
+use alloc::vec::Vec;
+use spin::Mutex;
 
 use crate::gui::geometry::Rect; //geometry module
 
-use core::sync::atomic::{AtomicI32, Ordering, AtomicUsize, AtomicBool};
 use core::future::Future;
 use core::pin::Pin;
+use core::sync::atomic::{AtomicBool, AtomicI32, AtomicUsize, Ordering};
 use core::task::{Context, Poll, Waker};
 
 // Global atomic coordinates that the Compositor will read
@@ -34,8 +36,8 @@ pub static DAMAGE_QUEUE: Mutex<Vec<Rect>> = Mutex::new(Vec::new());
 
 // We store raw global (x, y) physical screen coordinates here
 //pub static CLICK_QUEUE: spin::Mutex<alloc::vec::Vec<(i32, i32)>> = spin::Mutex::new(alloc::vec::Vec::new());
-pub static MOUSE_EVENTS: spin::Mutex<alloc::vec::Vec<RawMouse>> = spin::Mutex::new(alloc::vec::Vec::new());
-
+pub static MOUSE_EVENTS: spin::Mutex<alloc::vec::Vec<RawMouse>> =
+    spin::Mutex::new(alloc::vec::Vec::new());
 
 /// Any task can call this when it changes pixels on the screen
 pub fn report_damage(rect: Rect) {
@@ -61,7 +63,8 @@ pub enum AppRequest {
     Snake,
 }
 
-pub static APP_REQUESTS: spin::Mutex<alloc::vec::Vec<AppRequest>> = spin::Mutex::new(alloc::vec::Vec::new());
+pub static APP_REQUESTS: spin::Mutex<alloc::vec::Vec<AppRequest>> =
+    spin::Mutex::new(alloc::vec::Vec::new());
 
 pub struct WaitForDamage;
 
@@ -71,7 +74,7 @@ impl Future for WaitForDamage {
     fn poll(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<()> {
         let queue = DAMAGE_QUEUE.lock(); // Adjust crate path as needed
         let clock_ticked = CLOCK_TICK.load(Ordering::Relaxed);
-        let term_dirty = super::terminal::GUI_TERMINAL.lock().needs_redraw;   //random name for some reason.. 
+        let term_dirty = super::terminal::GUI_TERMINAL.lock().needs_redraw; //random name for some reason.. 
         if queue.is_empty() && !clock_ticked && !term_dirty {
             // The queue is empty. Register our alarm clock and go to sleep!
             *COMPOSITOR_WAKER.lock() = Some(cx.waker().clone());
@@ -83,15 +86,21 @@ impl Future for WaitForDamage {
     }
 }
 
-pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowManager, mut taskbar: Taskbar, screen_width: i32, screen_height: i32) {
+pub async fn compositor_task(
+    display: &mut FrameBufferDisplay,
+    mut wm: WindowManager,
+    mut taskbar: Taskbar,
+    screen_width: i32,
+    screen_height: i32,
+) {
     // Pre-render the desktop gradient into a buffer (once!)
     let bg_bpp = display.info.bytes_per_pixel;
     let bg_width = screen_width as usize;
     let bg_height = screen_height as usize;
     let mut bg_buffer = alloc::vec![0u8; bg_width * bg_height * bg_bpp];
 
-    let (r1, g1, b1): (i32, i32, i32) = (10, 10, 40);    // Dark navy top
-    let (r2, g2, b2): (i32, i32, i32) = (0, 128, 128);    // Teal bottom
+    let (r1, g1, b1): (i32, i32, i32) = (10, 10, 40); // Dark navy top
+    let (r2, g2, b2): (i32, i32, i32) = (0, 128, 128); // Teal bottom
 
     for y in 0..bg_height {
         let t = y as i32;
@@ -117,7 +126,7 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
         // 1.
         WaitForDamage.await;
         if CLOCK_TICK.swap(false, Ordering::Relaxed) {
-            // This recalculates the RTC time and automatically pushes 
+            // This recalculates the RTC time and automatically pushes
             // the new graphic to the DAMAGE_QUEUE!
             taskbar.tick();
         }
@@ -127,23 +136,30 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             if window.close_btn {
                 // Before it dies, report its entire physical footprint as damaged!
                 report_damage(Rect::new(
-                    window.x, window.y, 
-                    window.width as i32, window.height as i32
+                    window.x,
+                    window.y,
+                    window.width as i32,
+                    window.height as i32,
                 ));
-                
+
                 // Return false to permanently delete it from the Vector and free the RAM
-                false 
+                false
             } else {
                 // Keep the window alive
-                true 
+                true
             }
         });
         // i guess putting a for loop inorder to report the damage for minimized window.
-        for window in &mut wm.windows{
-            if window.is_minimized && !window.was_minimized{
-                report_damage(Rect::new(window.x,window.y,window.width as i32,window.height as i32,));
+        for window in &mut wm.windows {
+            if window.is_minimized && !window.was_minimized {
+                report_damage(Rect::new(
+                    window.x,
+                    window.y,
+                    window.width as i32,
+                    window.height as i32,
+                ));
                 window.was_minimized = true;
-            } else if !window.is_minimized && window.was_minimized{
+            } else if !window.is_minimized && window.was_minimized {
                 window.was_minimized = false;
             }
         }
@@ -161,69 +177,93 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 AppRequest::Files => {
                     // Spawn a 400x300 window in the center of the screen
                     let mut file_win = Window::with_state(
-                        100, 100, 400, 300, 
-                        "Files", Rgb888::WHITE, taskbar.bpp,
+                        100,
+                        100,
+                        400,
+                        300,
+                        "Files",
+                        Rgb888::WHITE,
+                        taskbar.bpp,
                         AppState::FileExplorer {
                             current_path: alloc::string::String::new(),
                             displayed_entries: alloc::vec::Vec::new(),
-                        }
+                        },
                     );
-                    file_win.render_file_explorer(); 
+                    file_win.render_file_explorer();
                     wm.add_window(file_win);
-                },
+                }
                 AppRequest::Terminal => {
                     let initial_terminal = {
                         let global = super::terminal::GUI_TERMINAL.lock();
                         global.clone()
                     };
                     let mut term_win = Window::with_state(
-                        100, 100, 400, 300, 
-                        "Terminal", Rgb888::BLACK, taskbar.bpp,
+                        100,
+                        100,
+                        400,
+                        300,
+                        "Terminal",
+                        Rgb888::BLACK,
+                        taskbar.bpp,
                         AppState::Terminal {
                             //terminal: super::terminal::GuiTerminal::new(),
-                            terminal:initial_terminal,
-                        }
+                            terminal: initial_terminal,
+                        },
                     );
                     // Draw the window background and the terminal text
                     term_win.render_internal_graphics();
-                    let mut temp_state = core::mem::replace(&mut term_win.app_state, AppState::None);
-                    
+                    let mut temp_state =
+                        core::mem::replace(&mut term_win.app_state, AppState::None);
+
                     if let AppState::Terminal { ref mut terminal } = temp_state {
                         terminal.needs_full_redraw = true;
                         terminal.render_into_window(&mut term_win);
                         //term_win.app_state = AppState::Terminal { terminal };
-                        term_win.app_state = AppState::Terminal { terminal: terminal.clone() };
-                    }else{
+                        term_win.app_state = AppState::Terminal {
+                            terminal: terminal.clone(),
+                        };
+                    } else {
                         term_win.app_state = temp_state;
                     }
 
                     //term_win.app_state = temp_state;
 
                     wm.add_window(term_win);
-                },
+                }
                 AppRequest::Calculator => {
                     let mut calc_win = Window::with_state(
-                        150, 150, 200, 250, 
-                        "Calculator", Rgb888::new(50, 50, 50), taskbar.bpp,
+                        150,
+                        150,
+                        200,
+                        250,
+                        "Calculator",
+                        Rgb888::new(50, 50, 50),
+                        taskbar.bpp,
                         crate::gui::window::AppState::Calculator {
                             display: alloc::string::String::from("0"),
                             clear_on_next: false,
-                        }
+                        },
                     );
-                    calc_win.render_calculator(); 
+                    calc_win.render_calculator();
                     wm.add_window(calc_win);
-                },
+                }
                 AppRequest::Paint => {
                     let mut paint_win = Window::with_state(
-                        120, 60, 270, 310,
-                        "Paint", Rgb888::WHITE, taskbar.bpp,
+                        120,
+                        60,
+                        270,
+                        310,
+                        "Paint",
+                        Rgb888::WHITE,
+                        taskbar.bpp,
                         AppState::Paint {
                             paint: super::paint::PaintApp::new(),
-                        }
+                        },
                     );
                     paint_win.render_internal_graphics();
-                    let mut temp_state = core::mem::replace(&mut paint_win.app_state, AppState::None);
-                    
+                    let mut temp_state =
+                        core::mem::replace(&mut paint_win.app_state, AppState::None);
+
                     if let AppState::Paint { ref mut paint } = temp_state {
                         paint.render_into_window(&mut paint_win);
                     }
@@ -231,33 +271,44 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     paint_win.app_state = temp_state;
 
                     wm.add_window(paint_win);
-                },
-                AppRequest::Snake =>{
+                }
+                AppRequest::Snake => {
                     let mut snake_win = Window::with_state(
-                        150,80,330,290,
-                        "Snake",Rgb888::new(26,26,46),taskbar.bpp,
-                        AppState::Snake{
-                            snake:super::snake::SnakeGame::new()
-                        }
+                        150,
+                        80,
+                        330,
+                        290,
+                        "Snake",
+                        Rgb888::new(26, 26, 46),
+                        taskbar.bpp,
+                        AppState::Snake {
+                            snake: super::snake::SnakeGame::new(),
+                        },
                     );
                     snake_win.render_snake();
                     wm.add_window(snake_win);
-                },
-                _ => {} 
+                }
+                _ => {}
             }
         }
         {
-            let minimized_titles: Vec<(String, usize)> = wm.windows.iter()
+            let minimized_titles: Vec<(String, usize)> = wm
+                .windows
+                .iter()
                 .enumerate()
                 .filter(|(_, w)| w.is_minimized)
                 .map(|(i, w)| (w.title.clone(), i))
                 .collect();
-            let changed = minimized_titles.len() != taskbar.minimized_labels.len() || minimized_titles.iter().zip(taskbar.minimized_labels.iter()).any(|(a, b)| a.0 != b.0 || a.1 != b.1);
+            let changed = minimized_titles.len() != taskbar.minimized_labels.len()
+                || minimized_titles
+                    .iter()
+                    .zip(taskbar.minimized_labels.iter())
+                    .any(|(a, b)| a.0 != b.0 || a.1 != b.1);
             // so wait, we further have to redraw the thing right, oh okayy yeah got it
-            if changed{
+            if changed {
                 let mut rtc = crate::gui::rtc::RTC::new();
                 let mut time = rtc.read_datetime();
-                time.apply_timezone_offset(5,30);
+                time.apply_timezone_offset(5, 30);
                 taskbar.render_internal_graphics(&time);
                 taskbar.draw_minimized_windows(&minimized_titles);
             }
@@ -273,42 +324,58 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
         // Route Clicks and Releases
         for event in raw_events {
             match event {
-                RawMouse::Left (x, y) => {
+                RawMouse::Left(x, y) => {
                     if y < taskbar.height as i32 {
                         // The click belongs to the taskbar!
-                        taskbar.send_event(UIEvent::MouseClick { 
-                            x, y, button: event // Local X and Y are identical to global here
+                        taskbar.send_event(UIEvent::MouseClick {
+                            x,
+                            y,
+                            button: event, // Local X and Y are identical to global here
                         });
 
                         match taskbar.process_events() {
                             TaskbarAction::OpenPowerMenu => {
                                 // Create a small 120x100 window right below the power button
                                 let mut power_menu = Window::new(
-                                    (taskbar.width - 120) as i32, taskbar.height as i32, 120, 100, 
-                                    "Power Menu", Rgb888::new(40, 40, 40), taskbar.bpp, 
+                                    (taskbar.width - 120) as i32,
+                                    taskbar.height as i32,
+                                    120,
+                                    100,
+                                    "Power Menu",
+                                    Rgb888::new(40, 40, 40),
+                                    taskbar.bpp,
                                 );
-                                
+
                                 // We will build this custom render function next!
-                                power_menu.render_power_menu(); 
+                                power_menu.render_power_menu();
                                 wm.add_window(power_menu);
-                            },
+                            }
                             TaskbarAction::OpenAppMenu => {
                                 // Create a 150x120 window anchored to the left
                                 let mut app_menu = Window::new(
-                                    0, taskbar.height as i32, 
-                                    150, 150, 
-                                    "App Menu", Rgb888::new(40, 40, 40), taskbar.bpp
+                                    0,
+                                    taskbar.height as i32,
+                                    150,
+                                    150,
+                                    "App Menu",
+                                    Rgb888::new(40, 40, 40),
+                                    taskbar.bpp,
                                 );
-                                
-                                app_menu.render_app_menu(); 
+
+                                app_menu.render_app_menu();
                                 wm.add_window(app_menu);
-                            },
-                            TaskbarAction::RestoreWindow(idx) =>{
-                                if let Some(window) = wm.windows.get_mut(idx){
+                            }
+                            TaskbarAction::RestoreWindow(idx) => {
+                                if let Some(window) = wm.windows.get_mut(idx) {
                                     window.is_minimized = false;
-                                    report_damage(Rect::new(window.x,window.y,window.width as i32, window.height as i32,));
+                                    report_damage(Rect::new(
+                                        window.x,
+                                        window.y,
+                                        window.width as i32,
+                                        window.height as i32,
+                                    ));
                                 }
-                            },
+                            }
                             TaskbarAction::None => {}
                         }
                         continue; // Skip the windows below!
@@ -316,17 +383,22 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
 
                     let mut clicked_index = None;
                     for (i, window) in wm.windows.iter_mut().enumerate().rev() {
-                        if window.is_minimized {continue;}
-                        if x >= window.x && x < window.x + (window.width as i32) &&
-                           y >= window.y && y < window.y + (window.height as i32) 
+                        if window.is_minimized {
+                            continue;
+                        }
+                        if x >= window.x
+                            && x < window.x + (window.width as i32)
+                            && y >= window.y
+                            && y < window.y + (window.height as i32)
                         {
-                            window.send_event(UIEvent::MouseClick { 
-                                x: x - window.x, y: y - window.y, 
-                                button: event
+                            window.send_event(UIEvent::MouseClick {
+                                x: x - window.x,
+                                y: y - window.y,
+                                button: event,
                             });
                             window.process_events();
                             clicked_index = Some(i);
-                            break; 
+                            break;
                         }
                     }
 
@@ -335,74 +407,94 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         if index != wm.windows.len() - 1 {
                             // Safely extract the window from the vector
                             let top_window = wm.windows.remove(index);
-                            
+
                             // Report damage so the Compositor repaints the overlapping areas
                             report_damage(Rect::new(
-                                top_window.x, top_window.y, 
-                                top_window.width as i32, top_window.height as i32
+                                top_window.x,
+                                top_window.y,
+                                top_window.width as i32,
+                                top_window.height as i32,
                             ));
-                            
+
                             // Push it to the back of the vector (which is the TOP of the screen)
                             wm.windows.push(top_window);
                         }
                     }
-                },
-                RawMouse::Left_Released (x, y)  => {
+                }
+                RawMouse::Left_Released(x, y) => {
                     // Tell ALL windows to let go!
                     for window in &mut wm.windows {
                         window.is_dragging = false;
                     }
-                },
-                RawMouse::Left_Pressed (x, y) => {
+                }
+                RawMouse::Left_Pressed(x, y) => {
                     for (i, window) in wm.windows.iter_mut().enumerate().rev() {
-                        if window.is_minimized {continue;}
-                        if x >= window.x && x < window.x + (window.width as i32) &&
-                           y >= window.y && y < window.y + (window.height as i32) 
+                        if window.is_minimized {
+                            continue;
+                        }
+                        if x >= window.x
+                            && x < window.x + (window.width as i32)
+                            && y >= window.y
+                            && y < window.y + (window.height as i32)
                         {
-                            window.send_event(UIEvent::MouseClick { 
-                                x: x - window.x, y: y - window.y, 
-                                button: event
+                            window.send_event(UIEvent::MouseClick {
+                                x: x - window.x,
+                                y: y - window.y,
+                                button: event,
                             });
                             window.process_events();
-                            break; 
+                            break;
                         }
                     }
                 }
-                _ => {} 
+                _ => {}
             }
         }
-
 
         if let Some(window) = wm.windows.last_mut() {
             // --- THE DRAG ENGINE ---
             // Grab the live atomic coordinates of the cursor
             let global_mouse_x = MOUSE_X.load(core::sync::atomic::Ordering::Relaxed) as i32;
             let global_mouse_y = MOUSE_Y.load(core::sync::atomic::Ordering::Relaxed) as i32;
-            
+
             if window.is_dragging {
                 // Calculate the new physical position using the local grab offset
-                let new_x = (global_mouse_x - window.drag_x).clamp(0, screen_width - window.width as i32);
-                let new_y = (global_mouse_y - window.drag_y).clamp(30, screen_height - window.height as i32);
+                let new_x =
+                    (global_mouse_x - window.drag_x).clamp(0, screen_width - window.width as i32);
+                let new_y = (global_mouse_y - window.drag_y)
+                    .clamp(30, screen_height - window.height as i32);
 
                 if new_x != window.x || new_y != window.y {
                     // 1. Report damage for the OLD position (Erases the trail)
-                    if window.x > new_x {  
+                    if window.x > new_x {
                         report_damage(Rect::new(
-                            new_x + window.width as i32, window.y, window.x - new_x, window.height as i32
+                            new_x + window.width as i32,
+                            window.y,
+                            window.x - new_x,
+                            window.height as i32,
                         ));
                     } else if window.x < new_x {
                         report_damage(Rect::new(
-                            window.x as i32, window.y, new_x - window.x, window.height as i32
+                            window.x as i32,
+                            window.y,
+                            new_x - window.x,
+                            window.height as i32,
                         ));
                     }
 
-                    if window.y > new_y {  
+                    if window.y > new_y {
                         report_damage(Rect::new(
-                            window.x, new_y + window.height as i32, window.width as i32, window.y - new_y
+                            window.x,
+                            new_y + window.height as i32,
+                            window.width as i32,
+                            window.y - new_y,
                         ));
                     } else if window.y < new_y {
                         report_damage(Rect::new(
-                            window.x, window.y as i32, window.width as i32, new_y - window.y
+                            window.x,
+                            window.y as i32,
+                            window.width as i32,
+                            new_y - window.y,
                         ));
                     }
 
@@ -412,13 +504,15 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
 
                     // 3. Report damage for the NEW position (Draws the window)
                     report_damage(Rect::new(
-                        window.x, window.y, window.width as i32, window.height as i32
+                        window.x,
+                        window.y,
+                        window.width as i32,
+                        window.height as i32,
                     ));
                 }
             }
         }
-        
-        
+
         let mut global_term_state = super::terminal::GUI_TERMINAL.lock();
         if global_term_state.needs_redraw {
             // what if i drop the lock and proceed and then i guess in the fut, push it back again..
@@ -428,14 +522,18 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             let snapshot_fg = global_term_state.fg;
             let snapshot_full = global_term_state.needs_full_redraw;
             // that means reddraw i should keep it false.
-            global_term_state.needs_redraw = false;  
+            global_term_state.needs_redraw = false;
             global_term_state.needs_full_redraw = false;
             drop(global_term_state); // Release lock BEFORE rendering
 
             for window in &mut wm.windows {
                 let is_terminal = matches!(&window.app_state, AppState::Terminal { .. });
-                if !is_terminal { continue; }
-                if window.is_minimized { continue; }
+                if !is_terminal {
+                    continue;
+                }
+                if window.is_minimized {
+                    continue;
+                }
                 let temp_state = core::mem::replace(&mut window.app_state, AppState::None);
 
                 if let AppState::Terminal { mut terminal } = temp_state {
@@ -445,14 +543,16 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                     terminal.row = snapshot_row;
                     terminal.col = snapshot_col;
                     terminal.fg = snapshot_fg;
-                    if snapshot_full  || old_row != snapshot_row{
+                    if snapshot_full || old_row != snapshot_row {
                         terminal.needs_full_redraw = true;
                     }
                     // Render into the WM-owned window
                     terminal.render_into_window(window);
                     report_damage(Rect::new(
-                        window.x, window.y + 20,
-                        window.width as i32, window.height as i32 - 20,
+                        window.x,
+                        window.y + 20,
+                        window.width as i32,
+                        window.height as i32 - 20,
                     ));
                     // Put state back
                     window.app_state = AppState::Terminal { terminal };
@@ -468,30 +568,35 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 q.clear();
                 s
             };
-            // this should hopefully fix the mouse movment along with snake 
+            // this should hopefully fix the mouse movment along with snake
             let current_pit = PIT_TICKS.load(Ordering::Relaxed);
             let pit_advanced = current_pit != last_snake_pit;
-            if pit_advanced {last_snake_pit = current_pit;}
+            if pit_advanced {
+                last_snake_pit = current_pit;
+            }
             for window in &mut wm.windows {
-                if window.is_minimized { continue; }
+                if window.is_minimized {
+                    continue;
+                }
                 if let AppState::Snake { ref mut snake } = window.app_state {
                     let old_body_head = snake.body.first().copied();
                     let old_state = snake.state;
                     for &sc in &scancodes {
                         snake.on_key(sc);
                     }
-                    
-                    if pit_advanced { snake.tick(); }
+
+                    if pit_advanced {
+                        snake.tick();
+                    }
                     let new_body_head = snake.body.first().copied();
 
-                    if old_state != snake.state{
+                    if old_state != snake.state {
                         window.render_snake();
-                    }else if old_body_head != new_body_head{
+                    } else if old_body_head != new_body_head {
                         window.render_snake_partial();
                     }
                 }
             }
-
         }
 
         // 2. Extract all damage rects and instantly unlock the queue
@@ -505,7 +610,6 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
 
         // 3. Process every damaged rectangle
         for damage in damage_rects {
-
             // ── FLICKER FIX ─────────────────────────────────────────
             // Check if the damage rect is fully inside any window.
             // If so, skip the background fill — the window blit will
@@ -518,10 +622,14 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
             } else {
                 // Check against regular windows (Status, etc.)
                 for window in &wm.windows {
-                    if window.is_minimized {continue;}
+                    if window.is_minimized {
+                        continue;
+                    }
                     let win_rect = Rect::new(
-                        window.x, window.y,
-                        window.width as i32, window.height as i32,
+                        window.x,
+                        window.y,
+                        window.width as i32,
+                        window.height as i32,
                     );
                     if win_rect.contains_rect(&damage) {
                         fully_covered = true;
@@ -530,14 +638,19 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 }
             }
 
-            if !fully_covered{
+            if !fully_covered {
                 let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
-                if let Some(window) = win_guard.as_ref(){
-                    if window.is_minimized {continue;}
+                if let Some(window) = win_guard.as_ref() {
+                    if window.is_minimized {
+                        continue;
+                    }
                     let win_rect = Rect::new(
-                        window.x,window.y, window.width as i32, window.height as i32,
+                        window.x,
+                        window.y,
+                        window.width as i32,
+                        window.height as i32,
                     );
-                    if win_rect.contains_rect(&damage){
+                    if win_rect.contains_rect(&damage) {
                         fully_covered = true;
                     }
                 }
@@ -548,28 +661,46 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                 display.blit_bg(&damage, &bg_buffer, bg_width);
             }
             for window in &wm.windows {
-                if window.is_minimized {continue;}
+                if window.is_minimized {
+                    continue;
+                }
                 let win_rect = Rect::new(
-                    window.x, window.y, 
-                    window.width as i32, window.height as i32
+                    window.x,
+                    window.y,
+                    window.width as i32,
+                    window.height as i32,
                 );
-                // have to eliminate the area so yeah this should do 
+                // have to eliminate the area so yeah this should do
                 if let Some(overlap) = damage.intersection(&win_rect) {
-                    display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
+                    display.blit_partial(
+                        &overlap,
+                        &window.buffer,
+                        window.width,
+                        window.x,
+                        window.y,
+                    );
                 }
             }
-                    
+
             // Notepad window (on top of terminal)  this is just for now
             // I guess we have to change this when we bring the dynammic window sizing.
             {
                 let win_guard = crate::gui::notepad::NOTEPAD_WINDOW.lock();
                 if let Some(window) = win_guard.as_ref() {
                     let win_rect = Rect::new(
-                        window.x, window.y,
-                        window.width as i32, window.height as i32,
+                        window.x,
+                        window.y,
+                        window.width as i32,
+                        window.height as i32,
                     );
                     if let Some(overlap) = damage.intersection(&win_rect) {
-                        display.blit_partial(&overlap, &window.buffer, window.width, window.x, window.y);
+                        display.blit_partial(
+                            &overlap,
+                            &window.buffer,
+                            window.width,
+                            window.x,
+                            window.y,
+                        );
                     }
                 }
             }
@@ -594,22 +725,29 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
     }
 }
 
-pub fn render_splash_screen(display: &mut FrameBufferDisplay, screen_width: i32, screen_height: i32) {
+pub fn render_splash_screen(
+    display: &mut FrameBufferDisplay,
+    screen_width: i32,
+    screen_height: i32,
+) {
     // 1. Clear the entire screen to a solid background color (e.g., Deep Gray or Black)
     let bg_style = PrimitiveStyle::with_fill(Rgb888::new(30, 30, 30));
-    let _ = Rectangle::new(Point::new(0, 0), Size::new(screen_width as u32, screen_height as u32))
-        .into_styled(bg_style)
-        .draw(display);
+    let _ = Rectangle::new(
+        Point::new(0, 0),
+        Size::new(screen_width as u32, screen_height as u32),
+    )
+    .into_styled(bg_style)
+    .draw(display);
 
     // 2. Prepare the OS Title Text
     let text_style = MonoTextStyle::new(&FONT_10X20, Rgb888::WHITE);
     let title = "KafkaOS:A Memory Safe x86_64 Microkernel Architecture";
-    
+
     // 3. Mathematical Centering!
     // Assuming FONT_10X20 means characters are 10px wide and 20px tall.
-    let text_width = (title.len() as u32 * 10) as i32; 
-    let text_height = 20; 
-    
+    let text_width = (title.len() as u32 * 10) as i32;
+    let text_height = 20;
+
     let center_x = (screen_width - text_width) / 2;
     let center_y = (screen_height - text_height) / 2;
 
@@ -617,7 +755,7 @@ pub fn render_splash_screen(display: &mut FrameBufferDisplay, screen_width: i32,
     let _ = Text::new(title, Point::new(center_x, center_y), text_style).draw(display);
 
     // 5. Force the framebuffer to update (if your display requires a manual flush)
-    // display.flush(); 
+    // display.flush();
 
     // 6. The Boot Delay
     // We use a busy-wait spin loop to freeze the screen for a moment.
@@ -635,13 +773,12 @@ pub fn setup_desktop(screen_width: i32, screen_height: i32, bpp: usize) -> Windo
     wm
 }
 
-
 pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
-    let mut mouse_stream = MouseStream::new(); 
+    let mut mouse_stream = MouseStream::new();
 
     // 1. Initialize Starting Position
-    let mut cursor_x: i32 = screen_width/2;
-    let mut cursor_y: i32 = screen_height/2;
+    let mut cursor_x: i32 = screen_width / 2;
+    let mut cursor_y: i32 = screen_height / 2;
 
     MOUSE_X.store(cursor_x, Ordering::Relaxed);
     MOUSE_Y.store(cursor_y, Ordering::Relaxed);
@@ -654,27 +791,41 @@ pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
     // 2. Report initial damage so the cursor draws on the very first frame
     {
         let mut queue = DAMAGE_QUEUE.lock();
-        queue.push(Rect::new(cursor_x, cursor_y, CURSOR_WIDTH as i32, CURSOR_HEIGHT as i32));
+        queue.push(Rect::new(
+            cursor_x,
+            cursor_y,
+            CURSOR_WIDTH as i32,
+            CURSOR_HEIGHT as i32,
+        ));
     }
-    
+
     let mut left_button_was_down = false;
 
     while let Some(packet) = mouse_stream.next().await {
-        
         if packet.left_btn && !left_button_was_down {
             // The user just clicked! Send the global coordinates to the sorter.
             //let mut clicks = CLICK_QUEUE.lock();
             //clicks.push((cursor_x, cursor_y));
             MOUSE_EVENTS.lock().push(RawMouse::Left(cursor_x, cursor_y));
-            
+
             // Wake up the Compositor to process the click immediately!
-            if let Some(waker) = COMPOSITOR_WAKER.lock().take() { waker.wake(); }
+            if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
+                waker.wake();
+            }
         } else if !packet.left_btn && left_button_was_down {
-            MOUSE_EVENTS.lock().push(RawMouse::Left_Released(cursor_x, cursor_y));
-            if let Some(waker) = COMPOSITOR_WAKER.lock().take() { waker.wake(); }
+            MOUSE_EVENTS
+                .lock()
+                .push(RawMouse::Left_Released(cursor_x, cursor_y));
+            if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
+                waker.wake();
+            }
         } else if packet.left_btn && left_button_was_down {
-            MOUSE_EVENTS.lock().push(RawMouse::Left_Pressed(cursor_x, cursor_y));
-            if let Some(waker) = COMPOSITOR_WAKER.lock().take() { waker.wake(); }
+            MOUSE_EVENTS
+                .lock()
+                .push(RawMouse::Left_Pressed(cursor_x, cursor_y));
+            if let Some(waker) = COMPOSITOR_WAKER.lock().take() {
+                waker.wake();
+            }
         }
 
         if packet.left_btn && (packet.x != 0 || packet.y != 0) {
@@ -682,16 +833,23 @@ pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
                 waker.wake();
             }
         }
-        
+
         left_button_was_down = packet.left_btn;
 
         // 3. Create a damage box for the OLD position (tells Compositor to erase it)
-        let old_rect = Rect::new(cursor_x, cursor_y, CURSOR_WIDTH as i32, CURSOR_HEIGHT as i32);
+        let old_rect = Rect::new(
+            cursor_x,
+            cursor_y,
+            CURSOR_WIDTH as i32,
+            CURSOR_HEIGHT as i32,
+        );
 
         // 4. Calculate new coordinates
-        cursor_x = (cursor_x + ((packet.x as i32) / SENSITIVITY)).clamp(0, screen_width - CURSOR_WIDTH as i32);
-        cursor_y = (cursor_y + ((packet.y as i32) / SENSITIVITY)).clamp(0, screen_height - CURSOR_HEIGHT as i32); 
-        
+        cursor_x = (cursor_x + ((packet.x as i32) / SENSITIVITY))
+            .clamp(0, screen_width - CURSOR_WIDTH as i32);
+        cursor_y = (cursor_y + ((packet.y as i32) / SENSITIVITY))
+            .clamp(0, screen_height - CURSOR_HEIGHT as i32);
+
         // 5. Update the global atomic coordinates for the Compositor
         MOUSE_X.store(cursor_x, Ordering::Relaxed);
         MOUSE_Y.store(cursor_y, Ordering::Relaxed);
@@ -704,7 +862,12 @@ pub async fn activate_mouse(screen_width: i32, screen_height: i32) {
         }*/
 
         // 6. Create a damage box for the NEW position (tells Compositor to draw it)
-        let new_rect = Rect::new(cursor_x, cursor_y, CURSOR_WIDTH as i32, CURSOR_HEIGHT as i32);
+        let new_rect = Rect::new(
+            cursor_x,
+            cursor_y,
+            CURSOR_WIDTH as i32,
+            CURSOR_HEIGHT as i32,
+        );
 
         // 7. Push both boxes to the damage queue
         {
@@ -727,12 +890,20 @@ pub fn draw_cursor<D>(target: &mut D, x: i32, y: i32) -> Result<(), D::Error>
 where
     D: DrawTarget<Color = Rgb888>,
 {
-    Triangle::new(Point::new(x, y), Point::new(x + 6, y + 12), Point::new(x, y + 20))
-        .into_styled(PrimitiveStyle::with_fill(Rgb888::BLACK))
-        .draw(target)?;
-    Triangle::new(Point::new(x, y), Point::new(x + 6, y + 12), Point::new(x + 16, y + 12))
-        .into_styled(PrimitiveStyle::with_fill(Rgb888::BLACK))
-        .draw(target)?;
+    Triangle::new(
+        Point::new(x, y),
+        Point::new(x + 6, y + 12),
+        Point::new(x, y + 20),
+    )
+    .into_styled(PrimitiveStyle::with_fill(Rgb888::BLACK))
+    .draw(target)?;
+    Triangle::new(
+        Point::new(x, y),
+        Point::new(x + 6, y + 12),
+        Point::new(x + 16, y + 12),
+    )
+    .into_styled(PrimitiveStyle::with_fill(Rgb888::BLACK))
+    .draw(target)?;
     let points: [Point; 5] = [
         Point::new(x, y),
         Point::new(x, y + 20),
@@ -764,16 +935,15 @@ pub enum RawMouse {
 pub enum UIEvent {
     /// Fired when a mouse button is pressed down
     MouseClick { x: i32, y: i32, button: RawMouse },
-    
+
     /// Fired when a mouse button is released
     MouseRelease { x: i32, y: i32, button: RawMouse },
 
     // Mouse Long Press
     //MousePressed { x: i32, y: i32, button: RawMouse },
-    
     /// Fired when the mouse enters or moves across the component
     MouseMove { x: i32, y: i32 },
-    
+
     /// (For later) Fired when a key is pressed and this component has focus
-    KeyPress { char: char }, 
+    KeyPress { char: char },
 }

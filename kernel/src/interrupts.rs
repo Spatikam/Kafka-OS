@@ -1,18 +1,20 @@
 // src/interrupts.rs
-use crate::{gdt, hlt_loop, print, println};
+use crate::gui::graphics;
 use crate::task::keyboard::WAKER;
+use crate::{gdt, hlt_loop, print, println};
+use alloc::vec::Vec;
+use core::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use crossbeam_queue::ArrayQueue;
 use lazy_static::lazy_static;
 use pic8259::ChainedPics;
 use spin;
 use x86_64::structures::idt::{InterruptDescriptorTable, InterruptStackFrame, PageFaultErrorCode};
-use crossbeam_queue::ArrayQueue;
-use core::sync::atomic::{AtomicU64,AtomicBool,Ordering};
-use crate::gui::graphics;
-use alloc::vec::Vec;
 
-pub static TICKS:AtomicU64=AtomicU64::new(0);
-pub static SNAKE_SCANCODES: spin::Mutex<alloc::vec::Vec<u8>> = spin::Mutex::new(alloc::vec::Vec::new());
-pub static SNAKE_ACTIVE: core::sync::atomic::AtomicBool = core::sync::atomic::AtomicBool::new(false);
+pub static TICKS: AtomicU64 = AtomicU64::new(0);
+pub static SNAKE_SCANCODES: spin::Mutex<alloc::vec::Vec<u8>> =
+    spin::Mutex::new(alloc::vec::Vec::new());
+pub static SNAKE_ACTIVE: core::sync::atomic::AtomicBool =
+    core::sync::atomic::AtomicBool::new(false);
 
 // --- 1. Constants & Enums ---
 pub const PIC_1_OFFSET: u8 = 32;
@@ -50,7 +52,7 @@ lazy_static! {
 lazy_static! {
     static ref IDT: InterruptDescriptorTable = {
         let mut idt = InterruptDescriptorTable::new();
-        
+
         // Exceptions
         idt.breakpoint.set_handler_fn(breakpoint_handler);
         unsafe {
@@ -63,7 +65,7 @@ lazy_static! {
         idt[InterruptIndex::Timer.as_usize()].set_handler_fn(timer_interrupt_handler);
         idt[InterruptIndex::Keyboard.as_usize()].set_handler_fn(keyboard_interrupt_handler);
         idt[InterruptIndex::Mouse.as_usize()].set_handler_fn(mouse_interrupt_handler);
-        
+
         idt
     };
 }
@@ -74,7 +76,7 @@ pub fn init_idt() {
 pub fn uptime_seconds() -> f64 {
     let ticks = TICKS.load(Ordering::Relaxed);
     // Standard PC timer frequency is roughly 18.2 Hz
-    ticks as f64 / 18.2 
+    ticks as f64 / 18.2
 }
 // --- 3. Exception Handlers ---
 
@@ -105,20 +107,20 @@ extern "x86-interrupt" fn double_fault_handler(
 
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
     // print!("."); // Uncomment to see timer ticks
-    TICKS.fetch_add(1,Ordering::Relaxed);
+    TICKS.fetch_add(1, Ordering::Relaxed);
 
     // Increment the heartbeat
     let ticks = graphics::PIT_TICKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-    
+
     // Every ~1 second (18 ticks), ring the alarm clock!
     if ticks % 18 == 0 {
         graphics::CLOCK_TICK.store(true, core::sync::atomic::Ordering::Relaxed);
-        
+
         // Wake up the Compositor!
         /*if let Some(waker) = crate::gui::graphics::COMPOSITOR_WAKER.lock().take() {
             waker.wake();
         }*/
-        if SNAKE_ACTIVE.load(Ordering::Relaxed)  || ticks % 18 == 0 {
+        if SNAKE_ACTIVE.load(Ordering::Relaxed) || ticks % 18 == 0 {
             if let Some(waker) = crate::gui::graphics::COMPOSITOR_WAKER.lock().take() {
                 waker.wake();
             }
@@ -135,13 +137,14 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     use x86_64::instructions::port::Port;
 
     let mut port = Port::new(0x60);
-    let scancode:u8 = unsafe {port.read()};
+    let scancode: u8 = unsafe { port.read() };
     crate::task::keyboard::add_scancode(scancode);
-    if SNAKE_ACTIVE.load(Ordering::Relaxed){
+    if SNAKE_ACTIVE.load(Ordering::Relaxed) {
         SNAKE_SCANCODES.lock().push(scancode);
     }
-    unsafe{
-        PICS.lock().notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
+    unsafe {
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
     }
 }
 extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFrame) {
@@ -150,7 +153,8 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
     let packet = unsafe { port.read() };
     crate::task::mouse::add_packet_from_interrupt(packet);
     unsafe {
-        PICS.lock().notify_end_of_interrupt(InterruptIndex::Mouse.as_u8());
+        PICS.lock()
+            .notify_end_of_interrupt(InterruptIndex::Mouse.as_u8());
     }
 }
 
