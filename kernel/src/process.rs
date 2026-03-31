@@ -1,10 +1,12 @@
 // src/process.rs
 use crate::gdt::GDT;
-use x86_64::VirtAddr;
 use alloc::vec::Vec;
 use core::arch::naked_asm;
-use x86_64::structures::paging::{PhysFrame, FrameAllocator, Size4KiB, Mapper, Page, PageTableFlags, OffsetPageTable, PageTable};
+use x86_64::VirtAddr;
 use x86_64::registers::control::Cr3;
+use x86_64::structures::paging::{
+    FrameAllocator, Mapper, OffsetPageTable, Page, PageTable, PageTableFlags, PhysFrame, Size4KiB,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ProcessId(pub u64);
@@ -27,7 +29,14 @@ pub struct Process {
 }
 
 impl Process {
-    pub fn new(id: u64, name: &'static str, stack_size: usize, is_user: bool, frame_allocator: &mut impl FrameAllocator<Size4KiB>, phys_mem_offset: VirtAddr) -> Self {
+    pub fn new(
+        id: u64,
+        name: &'static str,
+        stack_size: usize,
+        is_user: bool,
+        frame_allocator: &mut impl FrameAllocator<Size4KiB>,
+        phys_mem_offset: VirtAddr,
+    ) -> Self {
         let mut stack: Vec<u8> = Vec::with_capacity(stack_size);
         unsafe {
             stack.set_len(stack_size);
@@ -38,7 +47,9 @@ impl Process {
         let stack_start = VirtAddr::from_ptr(stack.as_ptr());
         let stack_end = stack_start + stack_size;
         let stack_pointer = stack_end;
-        let page_table = unsafe { crate::memory::create_new_page_table(frame_allocator, phys_mem_offset, is_user) };
+        let page_table = unsafe {
+            crate::memory::create_new_page_table(frame_allocator, phys_mem_offset, is_user)
+        };
         Self {
             id: ProcessId(id),
             name,
@@ -68,7 +79,13 @@ impl Process {
         self.stack_pointer = VirtAddr::new(sp);
     }
 
-    pub fn load_elf(&mut self, elf_data: &[u8], _mapper: &mut impl Mapper<Size4KiB>, allocator: &mut impl FrameAllocator<Size4KiB>, phys_mem_offset: VirtAddr) -> u64 {
+    pub fn load_elf(
+        &mut self,
+        elf_data: &[u8],
+        _mapper: &mut impl Mapper<Size4KiB>,
+        allocator: &mut impl FrameAllocator<Size4KiB>,
+        phys_mem_offset: VirtAddr,
+    ) -> u64 {
         let (kernel_frame, kernel_flags) = Cr3::read();
         unsafe {
             Cr3::write(self.page_table, kernel_flags);
@@ -77,14 +94,22 @@ impl Process {
             let page_table_ptr: *mut PageTable = virt_addr.as_mut_ptr();
             let root_table = &mut *page_table_ptr;
             let mut process_mapper = OffsetPageTable::new(root_table, phys_mem_offset);
-            let mut loader = crate::elf_loader::ElfLoader::new(elf_data, &mut process_mapper, allocator);
+            let mut loader =
+                crate::elf_loader::ElfLoader::new(elf_data, &mut process_mapper, allocator);
             let entry_point = loader.load();
             Cr3::write(kernel_frame, kernel_flags);
             entry_point
         }
     }
 
-    pub fn allocate_user_stack(&mut self, stack_addr: u64, size: u64, _mapper: &mut impl Mapper<Size4KiB>, allocator: &mut impl FrameAllocator<Size4KiB>, phys_mem_offset: VirtAddr) -> u64 {
+    pub fn allocate_user_stack(
+        &mut self,
+        stack_addr: u64,
+        size: u64,
+        _mapper: &mut impl Mapper<Size4KiB>,
+        allocator: &mut impl FrameAllocator<Size4KiB>,
+        phys_mem_offset: VirtAddr,
+    ) -> u64 {
         let (kernel_frame, kernel_flags) = Cr3::read();
         unsafe {
             Cr3::write(self.page_table, kernel_flags);
@@ -95,13 +120,18 @@ impl Process {
             let mut process_mapper = OffsetPageTable::new(root_table, phys_mem_offset);
             let start_page = Page::containing_address(VirtAddr::new(stack_addr));
             let end_page = Page::containing_address(VirtAddr::new(stack_addr + size));
-            let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+            let flags = PageTableFlags::PRESENT
+                | PageTableFlags::WRITABLE
+                | PageTableFlags::USER_ACCESSIBLE;
             for page in Page::range_inclusive(start_page, end_page) {
                 if process_mapper.translate_page(page).is_ok() {
                     process_mapper.unmap(page).expect("unmap failed").1.flush();
                 }
                 let frame = allocator.allocate_frame().unwrap();
-                process_mapper.map_to(page, frame, flags, allocator).unwrap().flush();
+                process_mapper
+                    .map_to(page, frame, flags, allocator)
+                    .unwrap()
+                    .flush();
             }
             Cr3::write(kernel_frame, kernel_flags);
         }

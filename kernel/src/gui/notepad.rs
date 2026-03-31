@@ -7,7 +7,7 @@ use core::sync::atomic::{AtomicBool, Ordering};
 use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::{Point, Size},
-    mono_font::{ascii::FONT_8X13, MonoTextStyle},
+    mono_font::{MonoTextStyle, ascii::FONT_8X13},
     pixelcolor::Rgb888,
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
@@ -17,7 +17,7 @@ use pc_keyboard::{DecodedKey, KeyCode};
 use spin::Mutex;
 
 use super::geometry::Rect;
-use super::graphics::{report_damage, COMPOSITOR_WAKER};
+use super::graphics::{COMPOSITOR_WAKER, report_damage};
 use super::window::Window;
 
 // ─── Window Geometry ─────────────────────────────────────────────
@@ -66,8 +66,8 @@ pub enum Mode {
     OpenPrompt,
 }
 
-// first i guess i will try for selection  using no_std 
-#[derive(Clone, Copy, PartialEq)]  //standard alloc 
+// first i guess i will try for selection  using no_std
+#[derive(Clone, Copy, PartialEq)] //standard alloc 
 struct Selection {
     start_row: usize,
     start_col: usize,
@@ -78,7 +78,9 @@ struct Selection {
 impl Selection {
     /// Returns (from_row, from_col, to_row, to_col) in document order
     fn ordered(&self) -> (usize, usize, usize, usize) {
-        if self.start_row < self.end_row || (self.start_row == self.end_row && self.start_col <= self.end_col) {
+        if self.start_row < self.end_row
+            || (self.start_row == self.end_row && self.start_col <= self.end_col)
+        {
             (self.start_row, self.start_col, self.end_row, self.end_col)
         } else {
             (self.end_row, self.end_col, self.start_row, self.start_col)
@@ -90,7 +92,7 @@ impl Selection {
     }
 }
 
-// I might test out with undo 
+// I might test out with undo
 #[derive(Clone)]
 struct Snapshot {
     lines: Vec<Vec<u8>>,
@@ -104,9 +106,9 @@ pub struct NotepadState {
     lines: Vec<Vec<u8>>, // for now .
     cursor_row: usize,
     cursor_col: usize,
-    scroll_row: usize, // for scrolling 
+    scroll_row: usize, // for scrolling
     scroll_col: usize,
-    selection: Option<Selection>, // this would mean like if i want to select a particular text after writing or while reading 
+    selection: Option<Selection>, // this would mean like if i want to select a particular text after writing or while reading
     clipboard: Vec<u8>,
     pub mode: Mode,
     prompt_buf: String,
@@ -150,10 +152,10 @@ impl NotepadState {
         self.redo_stack.clear();
     }
 
-    // i guess I can add some undo functions here which would be helpful 
+    // i guess I can add some undo functions here which would be helpful
     fn push_undo(&mut self) {
         let snap = Snapshot {
-            lines: self.lines.clone(), // clone it and pass 
+            lines: self.lines.clone(), // clone it and pass
             cursor_row: self.cursor_row,
             cursor_col: self.cursor_col,
         };
@@ -181,7 +183,7 @@ impl NotepadState {
         }
     }
 
-    // i guess if someone wants to redo it, it will be something like 
+    // i guess if someone wants to redo it, it will be something like
     fn redo(&mut self) {
         if let Some(snap) = self.redo_stack.pop() {
             let undo = Snapshot {
@@ -199,7 +201,7 @@ impl NotepadState {
         }
     }
 
-    // so i assume all the notepads do have the line length, so we can define something like this 
+    // so i assume all the notepads do have the line length, so we can define something like this
     fn line_len(&self, row: usize) -> usize {
         if row < self.lines.len() {
             self.lines[row].len()
@@ -208,12 +210,12 @@ impl NotepadState {
         }
     }
 
-    // and i guess i want to determine the total lines of the thing 
+    // and i guess i want to determine the total lines of the thing
     fn total_lines(&self) -> usize {
         self.lines.len()
     }
 
-    // now comes the cursor 
+    // now comes the cursor
     fn clamp_cursor(&mut self) {
         if self.cursor_row >= self.total_lines() {
             self.cursor_row = self.total_lines().saturating_sub(1);
@@ -224,7 +226,7 @@ impl NotepadState {
         }
     }
 
-    // to make sure it is visible 
+    // to make sure it is visible
     fn ensure_visible(&mut self) {
         // i guess we will start with vertical scroll
         if self.cursor_row < self.scroll_row {
@@ -242,7 +244,7 @@ impl NotepadState {
         }
     }
 
-    //Selection stuff 
+    //Selection stuff
     fn start_or_extend_selection(&mut self, shift: bool) {
         if shift {
             if self.selection.is_none() {
@@ -343,8 +345,8 @@ impl NotepadState {
         self.modified = true;
     }
 
-    // 
-    // will try to implement the text editing part 
+    //
+    // will try to implement the text editing part
     fn insert_char(&mut self, ch: u8) {
         self.push_undo();
         if self.cursor_col > self.lines[self.cursor_row].len() {
@@ -411,7 +413,7 @@ impl NotepadState {
         }
     }
 
-    // 
+    //
     // i will try to implement copy, paste, cut.
     fn copy(&mut self) {
         let text = self.get_selected_text();
@@ -510,8 +512,8 @@ impl NotepadState {
     }
 
     // ── File I/O ─────────────────────────────────────────────────
-    // here i will define some FILE I/O operations which we need to do 
-    // this would be linking with the fs.rs so yeah 
+    // here i will define some FILE I/O operations which we need to do
+    // this would be linking with the fs.rs so yeah
     fn save_file(&mut self) {
         let name = match &self.filename {
             Some(n) => n.clone(),
@@ -579,7 +581,10 @@ impl NotepadState {
         //  Text area background
         let _ = Rectangle::new(
             Point::new(0, TITLE_BAR_H),
-            Size::new(NOTEPAD_WIN_W, (NOTEPAD_WIN_H as i32 - TITLE_BAR_H - STATUS_BAR_H) as u32),
+            Size::new(
+                NOTEPAD_WIN_W,
+                (NOTEPAD_WIN_H as i32 - TITLE_BAR_H - STATUS_BAR_H) as u32,
+            ),
         )
         .into_styled(PrimitiveStyle::with_fill(BG_COLOR))
         .draw(window);
@@ -587,7 +592,10 @@ impl NotepadState {
         // 2. Gutter background
         let _ = Rectangle::new(
             Point::new(0, TITLE_BAR_H),
-            Size::new(GUTTER_W as u32, (NOTEPAD_WIN_H as i32 - TITLE_BAR_H - STATUS_BAR_H) as u32),
+            Size::new(
+                GUTTER_W as u32,
+                (NOTEPAD_WIN_H as i32 - TITLE_BAR_H - STATUS_BAR_H) as u32,
+            ),
         )
         .into_styled(PrimitiveStyle::with_fill(GUTTER_BG))
         .draw(window);
@@ -636,20 +644,14 @@ impl NotepadState {
         let py = TITLE_BAR_H + (vis_row as i32) * CHAR_H;
 
         // clear the entire row first (gutter + text area)
-        let _ = Rectangle::new(
-            Point::new(0, py),
-            Size::new(NOTEPAD_WIN_W, CHAR_H as u32),
-        )
-        .into_styled(PrimitiveStyle::with_fill(BG_COLOR))
-        .draw(window);
+        let _ = Rectangle::new(Point::new(0, py), Size::new(NOTEPAD_WIN_W, CHAR_H as u32))
+            .into_styled(PrimitiveStyle::with_fill(BG_COLOR))
+            .draw(window);
 
         // gutter bg for this row
-        let _ = Rectangle::new(
-            Point::new(0, py),
-            Size::new(GUTTER_W as u32, CHAR_H as u32),
-        )
-        .into_styled(PrimitiveStyle::with_fill(GUTTER_BG))
-        .draw(window);
+        let _ = Rectangle::new(Point::new(0, py), Size::new(GUTTER_W as u32, CHAR_H as u32))
+            .into_styled(PrimitiveStyle::with_fill(GUTTER_BG))
+            .draw(window);
 
         // if this row doesnt exist in the document, just leave it blank
         if doc_row >= self.total_lines() {
@@ -681,12 +683,9 @@ impl NotepadState {
             let in_selection = self.is_in_selection(doc_row, doc_col);
             if in_selection {
                 // paint the selection background behind the character
-                let _ = Rectangle::new(
-                    Point::new(px, py),
-                    Size::new(CHAR_W as u32, CHAR_H as u32),
-                )
-                .into_styled(PrimitiveStyle::with_fill(SELECT_BG))
-                .draw(window);
+                let _ = Rectangle::new(Point::new(px, py), Size::new(CHAR_W as u32, CHAR_H as u32))
+                    .into_styled(PrimitiveStyle::with_fill(SELECT_BG))
+                    .draw(window);
             }
 
             // draw the actual character
@@ -733,22 +732,16 @@ impl NotepadState {
         let px = TEXT_X + vc * CHAR_W;
         let py = TITLE_BAR_H + vr * CHAR_H;
         // Draw a 2px wide cursor line
-        let _ = Rectangle::new(
-            Point::new(px, py),
-            Size::new(2, CHAR_H as u32),
-        )
-        .into_styled(PrimitiveStyle::with_fill(CURSOR_COLOR))
-        .draw(window);
+        let _ = Rectangle::new(Point::new(px, py), Size::new(2, CHAR_H as u32))
+            .into_styled(PrimitiveStyle::with_fill(CURSOR_COLOR))
+            .draw(window);
     }
 
     fn render_title_bar(&self, window: &mut Window) {
         // title bar background
-        let _ = Rectangle::new(
-            Point::zero(),
-            Size::new(NOTEPAD_WIN_W, TITLE_BAR_H as u32),
-        )
-        .into_styled(PrimitiveStyle::with_fill(TITLE_BG))
-        .draw(window); // was accidentally Window (capital W) before, fixed it
+        let _ = Rectangle::new(Point::zero(), Size::new(NOTEPAD_WIN_W, TITLE_BAR_H as u32))
+            .into_styled(PrimitiveStyle::with_fill(TITLE_BG))
+            .draw(window); // was accidentally Window (capital W) before, fixed it
 
         // title text — shows filename + modified indicator
         let title = match &self.filename {
@@ -778,41 +771,29 @@ impl NotepadState {
 
         // Close button (rightmost)
         let close_x = NOTEPAD_WIN_W as i32 - btn_size as i32 - btn_gap;
-        let _ = Rectangle::new(
-            Point::new(close_x, btn_y),
-            Size::new(btn_size, btn_size),
-        )
-        .into_styled(PrimitiveStyle::with_fill(BTN_CLOSE))
-        .draw(window);
+        let _ = Rectangle::new(Point::new(close_x, btn_y), Size::new(btn_size, btn_size))
+            .into_styled(PrimitiveStyle::with_fill(BTN_CLOSE))
+            .draw(window);
         // little x on the close button
         let style_x = MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE);
         let _ = Text::new("x", Point::new(close_x + 2, btn_y + 11), style_x).draw(window);
 
         // Maximize button
         let max_x = close_x - btn_size as i32 - btn_gap;
-        let _ = Rectangle::new(
-            Point::new(max_x, btn_y),
-            Size::new(btn_size, btn_size),
-        )
-        .into_styled(PrimitiveStyle::with_fill(BTN_MAX))
-        .draw(window);
+        let _ = Rectangle::new(Point::new(max_x, btn_y), Size::new(btn_size, btn_size))
+            .into_styled(PrimitiveStyle::with_fill(BTN_MAX))
+            .draw(window);
 
         // Minimize button
         let min_x = max_x - btn_size as i32 - btn_gap;
-        let _ = Rectangle::new(
-            Point::new(min_x, btn_y),
-            Size::new(btn_size, btn_size),
-        )
-        .into_styled(PrimitiveStyle::with_fill(BTN_MIN))
-        .draw(window);
+        let _ = Rectangle::new(Point::new(min_x, btn_y), Size::new(btn_size, btn_size))
+            .into_styled(PrimitiveStyle::with_fill(BTN_MIN))
+            .draw(window);
 
         // Border under title bar
-        let _ = Rectangle::new(
-            Point::new(0, TITLE_BAR_H - 1),
-            Size::new(NOTEPAD_WIN_W, 1),
-        )
-        .into_styled(PrimitiveStyle::with_fill(Rgb888::new(80, 80, 80)))
-        .draw(window);
+        let _ = Rectangle::new(Point::new(0, TITLE_BAR_H - 1), Size::new(NOTEPAD_WIN_W, 1))
+            .into_styled(PrimitiveStyle::with_fill(Rgb888::new(80, 80, 80)))
+            .draw(window);
     }
 
     // the bottom bar — shows line/col info when editing, or the filename prompt when saving/opening
@@ -846,7 +827,8 @@ impl NotepadState {
             }
             Mode::Editing => {
                 // normal mode — show line number, column, and total lines on the left
-                let info = format_status(self.cursor_row + 1, self.cursor_col + 1, self.total_lines());
+                let info =
+                    format_status(self.cursor_row + 1, self.cursor_col + 1, self.total_lines());
                 let _ = Text::new(&info, Point::new(8, sy + 14), style).draw(window);
 
                 // some helpful shortcuts on the right side
@@ -918,7 +900,7 @@ pub fn open_notepad(bpp: usize) {
     }
 }
 
-// Opens the notepad with a file already loaded i mean something like notepad jvk.txt 
+// Opens the notepad with a file already loaded i mean something like notepad jvk.txt
 pub fn open_notepad_with_file(bpp: usize, filename: &str) {
     if NOTEPAD_ACTIVE.load(Ordering::Relaxed) {
         return;
@@ -1011,7 +993,12 @@ pub fn handle_key(key: DecodedKey, ctrl: bool, shift: bool) {
         if state.scroll_row != prev_scroll || state.total_lines() != prev_lines {
             state.render_full(window);
             // this is a fucking huge issue, i will redraw  the thing again here
-            report_damage(Rect::new(NOTEPAD_WIN_X, NOTEPAD_WIN_Y,NOTEPAD_WIN_W as i32, NOTEPAD_WIN_H as i32));
+            report_damage(Rect::new(
+                NOTEPAD_WIN_X,
+                NOTEPAD_WIN_Y,
+                NOTEPAD_WIN_W as i32,
+                NOTEPAD_WIN_H as i32,
+            ));
         } else {
             state.render_fast(prev_row, prev_col, window);
             let row1 = prev_row as i32 - state.scroll_row as i32;
@@ -1022,8 +1009,13 @@ pub fn handle_key(key: DecodedKey, ctrl: bool, shift: bool) {
             let y_start = NOTEPAD_WIN_Y + TITLE_BAR_H + min_vr * CHAR_H;
             let y_end = NOTEPAD_WIN_Y + TITLE_BAR_H + (max_vr + 1) * CHAR_H;
             let h = y_end - y_start;
-            report_damage(Rect::new(NOTEPAD_WIN_X,y_start,NOTEPAD_WIN_W as i32, h,));
-            report_damage(Rect::new(NOTEPAD_WIN_X,NOTEPAD_WIN_Y,NOTEPAD_WIN_W as i32,NOTEPAD_WIN_H as i32,));
+            report_damage(Rect::new(NOTEPAD_WIN_X, y_start, NOTEPAD_WIN_W as i32, h));
+            report_damage(Rect::new(
+                NOTEPAD_WIN_X,
+                NOTEPAD_WIN_Y,
+                NOTEPAD_WIN_W as i32,
+                NOTEPAD_WIN_H as i32,
+            ));
         }
     }
     drop(win_guard);
