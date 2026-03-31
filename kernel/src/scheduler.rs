@@ -1,6 +1,6 @@
-use crate::process::Process;
 use alloc::collections::VecDeque;
 use spin::Mutex;
+use crate::process::Process;
 use x86_64::structures::paging::PhysFrame;
 
 pub struct Scheduler {
@@ -45,12 +45,7 @@ impl Scheduler {
             } else {
                 "Ready"
             };
-            crate::println!(
-                "{:<5} | {:<13} | {}",
-                process.id.0,
-                process.name,
-                state_label
-            );
+            crate::println!("{:<5} | {:<13} | {}", process.id.0, process.name, state_label);
         }
         crate::println!("------+---------------+--------");
     }

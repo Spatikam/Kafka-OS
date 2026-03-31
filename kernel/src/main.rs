@@ -7,21 +7,19 @@
 
 extern crate alloc;
 
-use blog_os::elf_loader::ElfLoader;
-use blog_os::gdt;
 use blog_os::println;
-use blog_os::task::mouse::MouseStream;
 use blog_os::task::{Task, executor::Executor, keyboard, mouse};
+use bootloader_api::{BootInfo, entry_point, BootloaderConfig};
 use bootloader_api::config::Mapping;
-use bootloader_api::{BootInfo, BootloaderConfig, entry_point};
-use core::arch::{asm, naked_asm};
 use core::panic::PanicInfo;
-use futures_util::StreamExt;
+use core::arch::{asm, naked_asm};
+use x86_64::structures::paging::{Page, Mapper, Size4KiB, FrameAllocator, PageTableFlags as Flags, PhysFrame};
+use x86_64::{VirtAddr, PhysAddr};
+use blog_os::gdt;
+use blog_os::elf_loader::ElfLoader;
 use spin::Mutex;
-use x86_64::structures::paging::{
-    FrameAllocator, Mapper, Page, PageTableFlags as Flags, PhysFrame, Size4KiB,
-};
-use x86_64::{PhysAddr, VirtAddr};
+use blog_os::task::mouse::MouseStream;
+use futures_util::StreamExt;
 /*
 use embedded_graphics::{
     pixelcolor::Rgb888,
@@ -38,14 +36,7 @@ use embedded_graphics::{
 use blog_os::process;
 
 use blog_os::gui::buffer::FrameBufferDisplay;
-use blog_os::gui::{
-    graphics::{activate_mouse, compositor_task, render_splash_screen, setup_desktop},
-    window::{Window, WindowManager},
-};
-//net
-use blog_os::net::pci;
-use x86_64::instructions::port::Port;
-use x86_64::structures::paging::Translate;
+use blog_os::gui::{window::{Window, WindowManager}, graphics::{render_splash_screen, setup_desktop, activate_mouse, compositor_task}};
 
 static RAM_DISK: &[u8] = include_bytes!("../disk.tar");
 
@@ -57,7 +48,7 @@ const BOOTLOADER_CONFIG: BootloaderConfig = {
     config.mappings.physical_memory = Some(Mapping::Dynamic);
     config.frame_buffer.minimum_framebuffer_height = Some(1080);
     config.frame_buffer.minimum_framebuffer_width = Some(1920);
-    config.kernel_stack_size = 512 * 1024; //increase the stack size. i think we need to keeep on increasing this stuff unless we stop adding stuff so yeah
+    config.kernel_stack_size = 512 * 1024;  //increase the stack size. i think we need to keeep on increasing this stuff unless we stop adding stuff so yeah
     config
 };
 
@@ -65,22 +56,14 @@ entry_point!(kernel_main, config = &BOOTLOADER_CONFIG);
 
 fn process_a() {
     loop {
-        for _ in 0..1000000 {
-            unsafe {
-                core::arch::asm!("nop");
-            }
-        }
+        for _ in 0..1000000 { unsafe { core::arch::asm!("nop"); } }
         crate::process::sys_yield();
     }
 }
 
 fn process_b() {
     loop {
-        for _ in 0..1000000 {
-            unsafe {
-                core::arch::asm!("nop");
-            }
-        }
+        for _ in 0..1000000 { unsafe { core::arch::asm!("nop"); } }
         crate::process::sys_yield();
     }
 }
@@ -103,13 +86,15 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     blog_os::init();
 
-    let phys_mem_offset = VirtAddr::new(boot_info.physical_memory_offset.into_option().unwrap());
+    let phys_mem_offset = VirtAddr::new(
+        boot_info.physical_memory_offset.into_option().unwrap()
+    );
     let mut mapper = unsafe { memory::init(phys_mem_offset) };
-    unsafe {
-        blog_os::vga_buffer::init_vga_offset(phys_mem_offset.as_u64());
-    }
+    unsafe { blog_os::vga_buffer::init_vga_offset(phys_mem_offset.as_u64()); }
 
-    let mut frame_allocator = unsafe { BootInfoFrameAllocator::init(&boot_info.memory_regions) };
+    let mut frame_allocator = unsafe {
+        BootInfoFrameAllocator::init(&boot_info.memory_regions)
+    };
     allocator::init_heap(&mut mapper, &mut frame_allocator).expect("heap initialization failed");
 
     // --- FRAMEBUFFER (replaces VGA fixed **) ---
@@ -117,56 +102,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // let fb = boot_info.framebuffer.as_mut().unwrap();
     // ------------------------------------------
 
-    blog_os::fs::FILESYSTEM.init_once(|| Mutex::new(blog_os::fs::OverlayFileSystem::new(RAM_DISK)));
-    // === RTL8139 INIT ===
-    println!("\n Initializing RTL8139...");
-    let mut pci_bus = pci::Pci::new();
-    if let Some(mut rtl) = pci::RtlDevice::find(&mut pci_bus) {
-        println!("Found RTL8139 at I/O Base: {:#x}", rtl.io_base);
-        rtl.enable_bus_mastering(&mut pci_bus);
-        let io = rtl.io_base as u16;
-        blog_os::net::set_io_base(io);
-        pci::power_on_device(io);
-        pci::reset_rtl8139(io);
-        pci::set_imr_isr(io);
-        let tx_phys = mapper
-            .translate_addr(VirtAddr::from_ptr(unsafe {
-                core::ptr::addr_of!(pci::TX_BUFFERS) as *const u8
-            }))
-            .expect("TX_BUFFERS not mapped");
-        let tx_phys32 = tx_phys.as_u64() as u32;
-        assert!(tx_phys.as_u64() <= 0xFFFF_FFFF, "TX_BUFFERS above 4GB!");
-        unsafe {
-            pci::TX_PHYS_ADDR = tx_phys32;
-        }
-        crate::println!("TX phys addr: {:#x}", tx_phys32);
-        let buf_phys = mapper
-            .translate_addr(VirtAddr::from_ptr(unsafe {
-                core::ptr::addr_of!(pci::RX_BUFFER) as *const u8
-            }))
-            .expect("RX_BUFFER not mapped");
-        pci::reset_rtl8139(io);
-        pci::set_imr_isr(io);
-        let buf_phys32 = buf_phys.as_u64() as u32;
-        assert!(buf_phys.as_u64() <= 0xFFFF_FFFF, "RX_BUFFER above 4GB!");
-        crate::println!("RX phys addr: {:#x}", buf_phys32);
-        pci::init_recive_buffer(io, buf_phys32 as *const u8);
-        pci::init_rcr(io);
-        pci::enable_reciver(io);
-        println!(
-            "RTL8139 ready. MAC: {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}",
-            OUR_MAC[0], OUR_MAC[1], OUR_MAC[2], OUR_MAC[3], OUR_MAC[4], OUR_MAC[5]
-        );
-        println!(
-            "IP: {}.{}.{}.{}",
-            OUR_IP[0], OUR_IP[1], OUR_IP[2], OUR_IP[3]
-        );
-        blog_os::net::set_mac_address(OUR_MAC);
-        blog_os::net::set_ip_address(OUR_IP);
-    } else {
-        println!("RTL8139 not found — network disabled.");
-    }
-    // === END RTL8139 INIT ===
+    blog_os::fs::FILESYSTEM.init_once(|| {
+        Mutex::new(blog_os::fs::OverlayFileSystem::new(RAM_DISK))
+    });
+
     // --- INIT GUI ---
     if let Some(framebuffer) = boot_info.framebuffer.as_ref() {
         unsafe {
@@ -176,7 +115,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
             let ptr = framebuffer.buffer().as_ptr() as *mut u8;
             let len = framebuffer.buffer().len();
             let slice = core::slice::from_raw_parts_mut(ptr, len);
-
+            
             GUI_DISPLAY = Some(FrameBufferDisplay::new(slice, info));
         }
         crate::println!("GUI Display Initialized!");
@@ -196,6 +135,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     //crate::println!("width:{width}, height: {height}");
     unsafe {
         if let Some(display) = &mut *ptr {
+
             render_splash_screen(display, width, height); // splash screen
 
             // Prepare the off-screen windows in standard RAM
@@ -203,20 +143,17 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
             // Start the asynchronous task scheduler
             let mut exec = Executor::new();
-
+            
             exec.spawn(Task::new(blog_os::cli::run()));
 
             // Spawn the mouse input task
             exec.spawn(Task::new(activate_mouse(width, height)));
 
             // Spawn the Taskbar
-            let taskbar =
-                blog_os::gui::taskbar::Taskbar::new(width as u32, display.info.bytes_per_pixel);
+            let taskbar = blog_os::gui::taskbar::Taskbar::new(width as u32, display.info.bytes_per_pixel);
 
             // Spawn the Compositor
-            exec.spawn(Task::new(compositor_task(
-                display, wm, taskbar, width, height,
-            )));
+            exec.spawn(Task::new(compositor_task(display, wm, taskbar, width, height)));
 
             exec.run();
         }
@@ -227,68 +164,22 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     crate::println!("\n[SCHEDULER] Spawning Processes...");
 
-    let mut p0 = process::Process::new(
-        0,
-        "Boot",
-        4096,
-        false,
-        &mut frame_allocator,
-        phys_mem_offset,
-    );
-    let mut p1 = process::Process::new(
-        1,
-        "ProcA",
-        4096,
-        false,
-        &mut frame_allocator,
-        phys_mem_offset,
-    );
+    let mut p0 = process::Process::new(0, "Boot",   4096,  false, &mut frame_allocator, phys_mem_offset);
+    let mut p1 = process::Process::new(1, "ProcA",  4096,  false, &mut frame_allocator, phys_mem_offset);
     p1.init_stack(process_a as u64);
-    let mut p2 = process::Process::new(
-        2,
-        "ProcB",
-        4096,
-        false,
-        &mut frame_allocator,
-        phys_mem_offset,
-    );
+    let mut p2 = process::Process::new(2, "ProcB",  4096,  false, &mut frame_allocator, phys_mem_offset);
     p2.init_stack(process_b as u64);
-    let mut p3 = process::Process::new(
-        3,
-        "Shell",
-        32768,
-        false,
-        &mut frame_allocator,
-        phys_mem_offset,
-    );
+    let mut p3 = process::Process::new(3, "Shell",  32768, false, &mut frame_allocator, phys_mem_offset);
     p3.init_stack(process_shell as u64);
 
-    let mut p_user = process::Process::new(
-        5,
-        "UserApp",
-        32768,
-        true,
-        &mut frame_allocator,
-        phys_mem_offset,
-    );
+    let mut p_user = process::Process::new(5, "UserApp", 32768, true, &mut frame_allocator, phys_mem_offset);
     let fs = blog_os::fs::TarFileSystem::new(RAM_DISK);
     let elf_data_unaligned = fs.read_file("test_app").expect("Could not find test_app");
     use alloc::vec::Vec;
     let elf_data = Vec::from(elf_data_unaligned);
 
-    let entry_point = p_user.load_elf(
-        &elf_data,
-        &mut mapper,
-        &mut frame_allocator,
-        phys_mem_offset,
-    );
-    let user_stack_top = p_user.allocate_user_stack(
-        0x5000_0000,
-        20 * 1024,
-        &mut mapper,
-        &mut frame_allocator,
-        phys_mem_offset,
-    );
+    let entry_point = p_user.load_elf(&elf_data, &mut mapper, &mut frame_allocator, phys_mem_offset);
+    let user_stack_top = p_user.allocate_user_stack(0x5000_0000, 20 * 1024, &mut mapper, &mut frame_allocator, phys_mem_offset);
     crate::println!("User App loaded at Entry Point: {:#x}", entry_point);
 
     unsafe {
@@ -326,11 +217,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 
     crate::println!("[SCHEDULER] Starting Multitasking...");
 
-    for _ in 0..100000 {
-        unsafe {
-            core::arch::asm!("nop");
-        }
-    }
+    for _ in 0..100000 { unsafe { core::arch::asm!("nop"); } }
 
     x86_64::instructions::interrupts::enable();
 
@@ -342,7 +229,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
 pub unsafe fn test_user_mode(
     mapper: &mut impl Mapper<Size4KiB>,
     frame_allocator: &mut impl FrameAllocator<Size4KiB>,
-    fs: &blog_os::fs::TarFileSystem,
+    fs: &blog_os::fs::TarFileSystem
 ) {
     use alloc::vec::Vec;
     use x86_64::structures::paging::PageTableFlags;
@@ -352,9 +239,7 @@ pub unsafe fn test_user_mode(
 
     crate::println!("Preparing to jump to user mode...");
 
-    let data_unaligned = fs
-        .read_file("./test_app")
-        .expect("Failed to find ./test_app");
+    let data_unaligned = fs.read_file("./test_app").expect("Failed to find ./test_app");
     let data_aligned = data_unaligned.to_vec();
     let mut loader = blog_os::elf_loader::ElfLoader::new(&data_aligned, mapper, frame_allocator);
     let entry_point = loader.load();
@@ -362,11 +247,9 @@ pub unsafe fn test_user_mode(
     let stack_addr = 0x5000_0000u64;
     let stack_page = Page::containing_address(VirtAddr::new(stack_addr));
     let frame = frame_allocator.allocate_frame().unwrap();
-    let flags =
-        PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+    let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
 
-    mapper
-        .map_to(stack_page, frame, flags, frame_allocator)
+    mapper.map_to(stack_page, frame, flags, frame_allocator)
         .unwrap()
         .flush();
 
@@ -394,7 +277,13 @@ pub unsafe fn test_user_mode(
 #[unsafe(naked)]
 extern "C" fn user_mode_function() {
     unsafe {
-        naked_asm!("mov rax, 1", "mov rdi, 0xDEAD", "syscall", "2:", "jmp 2b",);
+        naked_asm!(
+            "mov rax, 1",
+            "mov rdi, 0xDEAD",
+            "syscall",
+            "2:",
+            "jmp 2b",
+        );
     }
 }
 
@@ -412,12 +301,7 @@ async fn test_mouse() {
     crate::println!("Move the mouse to see coordinates!");
     while let Some(packet) = mouse_stream.next().await {
         if packet.x != 0 || packet.y != 0 {
-            crate::println!(
-                "Mouse: X={}, Y={}, Click={}",
-                packet.x,
-                packet.y,
-                packet.left_btn
-            );
+            crate::println!("Mouse: X={}, Y={}, Click={}", packet.x, packet.y, packet.left_btn);
         }
     }
 }
@@ -434,17 +318,11 @@ pub async fn print_mouse_packets() {
             y_pos = (y_pos as i32 - packet.y as i32).clamp(0, 24) as usize;
             crate::println!(
                 "Mouse Packet: dx={}, dy={} -> Pos({}, {})",
-                packet.x,
-                packet.y,
-                x_pos,
-                y_pos
+                packet.x, packet.y, x_pos, y_pos
             );
         }
     }
 }
-
-const OUR_MAC: [u8; 6] = [0x52, 0x54, 0x00, 0x12, 0x34, 0x56];
-const OUR_IP: [u8; 4] = [10, 0, 2, 15];
 
 #[cfg(not(test))]
 #[panic_handler]
