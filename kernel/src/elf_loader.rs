@@ -1,12 +1,6 @@
 // src/elf_loader.rs
-use x86_64::{
-    VirtAddr,
-    structures::paging::{FrameAllocator, Mapper, Page, PageTableFlags, Size4KiB},
-};
-use xmas_elf::{
-    ElfFile,
-    program::{ProgramHeader, Type},
-};
+use x86_64::{VirtAddr, structures::paging::{Page, PageTableFlags, Mapper, Size4KiB, FrameAllocator}};
+use xmas_elf::{ElfFile, program::{Type, ProgramHeader}};
 
 // FIX: Move from 0x400000 to 0x1000_0000 so we don't collide with the Kernel
 const LOAD_OFFSET: u64 = 0x1000_0000;
@@ -36,6 +30,7 @@ where
         for ph in self.elf.program_iter() {
             if let ProgramHeader::Ph64(header) = ph {
                 if header.get_type().unwrap() == Type::Load {
+                    
                     let virt_start = header.virtual_addr + LOAD_OFFSET;
                     let mem_size = header.mem_size;
                     let file_size = header.file_size;
@@ -45,6 +40,7 @@ where
                     let end_page = Page::containing_address(VirtAddr::new(virt_start + mem_size));
 
                     for page in Page::range_inclusive(start_page, end_page) {
+                        
                         // --- THE FIX: FORCE UNMAP FIRST ---
                         // If the page exists (bootloader mapping), kill it.
                         if self.mapper.translate_page(page).is_ok() {
@@ -53,13 +49,10 @@ where
 
                         // Now map it fresh with OUR rules
                         let frame = self.allocator.allocate_frame().unwrap();
-                        let flags = PageTableFlags::PRESENT
-                            | PageTableFlags::WRITABLE
-                            | PageTableFlags::USER_ACCESSIBLE;
-
+                        let flags = PageTableFlags::PRESENT | PageTableFlags::WRITABLE | PageTableFlags::USER_ACCESSIBLE;
+                        
                         unsafe {
-                            self.mapper
-                                .map_to(page, frame, flags, self.allocator)
+                            self.mapper.map_to(page, frame, flags, self.allocator)
                                 .unwrap()
                                 .flush();
                         }
@@ -75,7 +68,8 @@ where
                 }
             }
         }
-
+        
         self.elf.header.pt2.entry_point() + LOAD_OFFSET
     }
+        
 }

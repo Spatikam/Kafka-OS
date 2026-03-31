@@ -3,7 +3,6 @@
 // GUI Paint Application for KafkaOS — Compositor-Compatible
 // A basic drawing canvas with color palette and mouse-driven painting.
 
-use conquer_once::spin::Lazy;
 use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::{Point, Size},
@@ -12,10 +11,11 @@ use embedded_graphics::{
     primitives::{PrimitiveStyle, Rectangle},
 };
 use spin::Mutex;
+use conquer_once::spin::Lazy;
 
 use super::geometry::Rect;
 use super::graphics::{COMPOSITOR_WAKER, report_damage};
-use super::window::{AppState, Window};
+use super::window::{Window, AppState};
 
 // ── Window layout constants ─────────────────────────────────────────
 pub const PAINT_WIN_X: i32 = 120;
@@ -217,16 +217,12 @@ impl PaintApp {
 }
 
 // ── Global statics ──────────────────────────────────────────────────
-pub static PAINT_APP: Lazy<Mutex<PaintApp>> = Lazy::new(|| Mutex::new(PaintApp::new()));
+pub static PAINT_APP: Lazy<Mutex<PaintApp>> = Lazy::new(|| {
+    Mutex::new(PaintApp::new())
+});
 
 // ── Mouse interaction helpers ───────────────────────────────────────
-pub fn handle_paint_click(
-    screen_x: i32,
-    screen_y: i32,
-    win_x: i32,
-    win_y: i32,
-    window: &mut Window,
-) {
+pub fn handle_paint_click(screen_x: i32, screen_y: i32, win_x: i32, win_y: i32, window: &mut Window) {
     // Convert screen coords → window-local coords
     let local_x = screen_x - win_x;
     let local_y = screen_y - win_y;
@@ -254,15 +250,12 @@ pub fn handle_paint_click(
             }
         });
     } else {
+
         // Check if click is on the canvas
         let canvas_x = local_x;
         let canvas_y = local_y - CANVAS_Y_OFFSET;
 
-        if canvas_x >= 0
-            && canvas_x < CANVAS_W as i32
-            && canvas_y >= 0
-            && canvas_y < CANVAS_H as i32
-        {
+        if canvas_x >= 0 && canvas_x < CANVAS_W as i32 && canvas_y >= 0 && canvas_y < CANVAS_H as i32 {
             x86_64::instructions::interrupts::without_interrupts(|| {
                 let mut app = PAINT_APP.lock();
                 //let mut guard = PAINT_APP.lock();

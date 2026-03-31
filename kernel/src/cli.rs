@@ -1,15 +1,15 @@
 // src/cli.rs
-use crate::QemuExitCode;
-use crate::exit_qemu;
-use crate::gui::notepad;
-use crate::gui::terminal::{self, COLOR_CYAN, COLOR_GREEN, COLOR_RED, COLOR_WHITE, COLOR_YELLOW};
-use crate::task::keyboard::ScancodeStream;
 use crate::{tprint, tprintln};
-use alloc::format;
+use crate::task::keyboard::ScancodeStream;
+use crate::exit_qemu;
+use crate::QemuExitCode;
+use crate::gui::terminal::{self, COLOR_CYAN, COLOR_YELLOW, COLOR_GREEN, COLOR_WHITE, COLOR_RED};
+use crate::gui::notepad;
+use futures_util::stream::StreamExt;
+use pc_keyboard::{layouts, DecodedKey, HandleControl, Keyboard, ScancodeSet1, KeyCode};
 use alloc::string::String;
 use alloc::vec::Vec;
-use futures_util::stream::StreamExt;
-use pc_keyboard::{DecodedKey, HandleControl, KeyCode, Keyboard, ScancodeSet1, layouts};
+use alloc::format;
 
 pub async fn run() {
     let mut scancodes = ScancodeStream::new();
@@ -27,7 +27,7 @@ pub async fn run() {
     // we need to track these ourselves for notepad shortcuts, would help use to trigger some func.
     let mut ctrl_pressed = false;
     let mut shift_pressed = false;
-
+    
     print_prompt(&cwd);
 
     while let Some(scancode) = scancodes.next().await {
@@ -46,9 +46,11 @@ pub async fn run() {
 
             // always process key event (keeps keyboard decoder state in sync)
             if let Some(key) = keyboard.process_keyevent(key_event) {
+
+                
                 // if notepad is open, send all keys there instead of the terminal  // yeah this is a bit of conflict
                 // for now if this is open, we can't access the terminal.. we kinda need to do some kind of sharing.
-                // so when we make the stuff dynammic, i will reroute this..
+                // so when we make the stuff dynammic, i will reroute this.. 
                 if notepad::is_active() {
                     // check for escape to close notepad
                     let is_escape = matches!(
@@ -71,13 +73,14 @@ pub async fn run() {
                     } else {
                         notepad::handle_key(key, ctrl_pressed, shift_pressed);
                     }
-                    continue;
+                    continue; 
                 }
                 match key {
                     DecodedKey::Unicode(character) => match character {
                         '\n' => {
                             tprintln!();
-                            execute_command(&input_buffer, &mut cwd).await;
+                            execute_command(&input_buffer, &mut cwd);
+
                             if !input_buffer.is_empty() {
                                 history.push(input_buffer.clone());
                             }
@@ -141,27 +144,8 @@ fn print_prompt(cwd: &str) {
     tprint!("> ");
     terminal::set_terminal_color(COLOR_YELLOW);
 }
-async fn yield_now() {
-    struct YieldOnce(bool);
-    impl core::future::Future for YieldOnce {
-        type Output = ();
-        fn poll(
-            mut self: core::pin::Pin<&mut Self>,
-            cx: &mut core::task::Context,
-        ) -> core::task::Poll<()> {
-            if self.0 {
-                core::task::Poll::Ready(())
-            } else {
-                self.0 = true;
-                cx.waker().wake_by_ref();
-                core::task::Poll::Pending
-            }
-        }
-    }
-    YieldOnce(false).await
-}
 
-async fn execute_command(input: &str, cwd: &mut String) {
+fn execute_command(input: &str, cwd: &mut String) {
     let mut parts = input.trim().split_whitespace();
     let command = match parts.next() {
         Some(s) => s,
@@ -173,7 +157,7 @@ async fn execute_command(input: &str, cwd: &mut String) {
 
     match command {
         "help" => tprintln!(
-            "Commands: help version clear echo ls cd cat calc kafkafetch ifconfig ping shutdown touch write rm ps notepad"
+            "Commands: help version clear echo ls cd cat calc kafkafetch shutdown touch write rm ps"
         ),
 
         "version" => tprintln!("KafkaOS v0.1.0"),
@@ -320,49 +304,31 @@ async fn execute_command(input: &str, cwd: &mut String) {
         "calc" => {
             let num1_str = match args.next() {
                 Some(s) => s,
-                None => {
-                    tprintln!("Usage: calc <n> <op> <n>");
-                    return;
-                }
+                None => { tprintln!("Usage: calc <n> <op> <n>"); return; }
             };
             let op = match args.next() {
                 Some(s) => s,
-                None => {
-                    tprintln!("Error: Missing operator.");
-                    return;
-                }
+                None => { tprintln!("Error: Missing operator."); return; }
             };
             let num2_str = match args.next() {
                 Some(s) => s,
-                None => {
-                    tprintln!("Usage: calc <n> <op> <n>");
-                    return;
-                }
+                None => { tprintln!("Usage: calc <n> <op> <n>"); return; }
             };
             let num1: i64 = match num1_str.parse() {
                 Ok(n) => n,
-                Err(_) => {
-                    tprintln!("Error: '{}' NaN", num1_str);
-                    return;
-                }
+                Err(_) => { tprintln!("Error: '{}' NaN", num1_str); return; }
             };
             let num2: i64 = match num2_str.parse() {
                 Ok(n) => n,
-                Err(_) => {
-                    tprintln!("Error: '{}' NaN", num2_str);
-                    return;
-                }
+                Err(_) => { tprintln!("Error: '{}' NaN", num2_str); return; }
             };
             match op {
                 "+" => tprintln!("Result: {}", num1 + num2),
                 "-" => tprintln!("Result: {}", num1 - num2),
                 "*" => tprintln!("Result: {}", num1 * num2),
                 "/" => {
-                    if num2 == 0 {
-                        tprintln!("Error: Division by zero!");
-                    } else {
-                        tprintln!("Result: {}", num1 / num2);
-                    }
+                    if num2 == 0 { tprintln!("Error: Division by zero!"); }
+                    else { tprintln!("Result: {}", num1 / num2); }
                 }
                 "%" => tprintln!("Result: {}", num1 % num2),
                 _ => tprintln!("Error: Unknown op '{}'", op),
@@ -385,10 +351,7 @@ async fn execute_command(input: &str, cwd: &mut String) {
         "touch" => {
             let filename = match args.next() {
                 Some(s) => s,
-                None => {
-                    tprintln!("Usage: touch <filename>");
-                    return;
-                }
+                None => { tprintln!("Usage: touch <filename>"); return; }
             };
             let full_path = if filename.starts_with('/') {
                 String::from(filename.trim_start_matches('/'))
@@ -405,10 +368,7 @@ async fn execute_command(input: &str, cwd: &mut String) {
         "write" => {
             let filename = match args.next() {
                 Some(s) => s,
-                None => {
-                    tprintln!("Usage: write <file> <text>");
-                    return;
-                }
+                None => { tprintln!("Usage: write <file> <text>"); return; }
             };
             let full_path = if filename.starts_with('/') {
                 String::from(filename.trim_start_matches('/'))
@@ -430,10 +390,7 @@ async fn execute_command(input: &str, cwd: &mut String) {
         "rm" => {
             let filename = match args.next() {
                 Some(s) => s,
-                None => {
-                    tprintln!("Usage: rm <filename>");
-                    return;
-                }
+                None => { tprintln!("Usage: rm <filename>"); return; }
             };
             let full_path = if filename.starts_with('/') {
                 String::from(filename.trim_start_matches('/'))
@@ -450,141 +407,12 @@ async fn execute_command(input: &str, cwd: &mut String) {
         }
         "notepad" => {
             let bpp = notepad::get_bpp();
-            if let Some(filename) = args.next() {
-                tprintln!("Opening {}", filename);
+            if let Some(filename) = args.next(){
+                tprintln!("Opening {}",filename);
                 notepad::open_notepad_with_file(bpp, filename);
-            } else {
+            }else{
                 tprintln!("Opening Notepad...");
                 notepad::open_notepad(bpp);
-            }
-        }
-        "ifconfig" => {
-            if let (Some(mac), Some(ip)) =
-                (crate::net::get_mac_address(), crate::net::get_ip_address())
-            {
-                let rx_count = crate::net::get_rx_count();
-                let tx_count = crate::net::get_tx_count();
-                terminal::set_terminal_color(COLOR_CYAN);
-                tprintln!("eth0: flags=4163<UP,BROADCAST,RUNNING,MULTICAST>  mtu 1500");
-                terminal::set_terminal_color(COLOR_YELLOW);
-                tprintln!(
-                    "        inet {}.{}.{}.{}  netmask 255.255.255.0  broadcast 10.0.2.255",
-                    ip[0],
-                    ip[1],
-                    ip[2],
-                    ip[3]
-                );
-                tprintln!(
-                    "        ether {:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}  txqueuelen 1000",
-                    mac[0],
-                    mac[1],
-                    mac[2],
-                    mac[3],
-                    mac[4],
-                    mac[5]
-                );
-                tprintln!("        RX packets {}  bytes {}", rx_count, rx_count * 64);
-                tprintln!("        TX packets {}  bytes {}", tx_count, tx_count * 64);
-            } else {
-                terminal::set_terminal_color(COLOR_RED);
-                tprintln!("eth0: network not initialized");
-            }
-        }
-
-        "ping" => {
-            let target = match args.next() {
-                Some(s) => s,
-                None => {
-                    tprintln!("Usage: ping <ip>");
-                    return;
-                }
-            };
-            let parts: alloc::vec::Vec<&str> = target.split('.').collect();
-            if parts.len() != 4 {
-                tprintln!("Error: invalid IP '{}'", target);
-                return;
-            }
-            let mut ip = [0u8; 4];
-            let mut parse_ok = true;
-            for (i, p) in parts.iter().enumerate() {
-                match p.parse::<u8>() {
-                    Ok(n) => ip[i] = n,
-                    Err(_) => {
-                        parse_ok = false;
-                        break;
-                    }
-                }
-            }
-            if !parse_ok {
-                tprintln!("Error: invalid IP '{}'", target);
-                return;
-            }
-
-            tprintln!("PING {}.{}.{}.{}", ip[0], ip[1], ip[2], ip[3]);
-            yield_now().await;
-
-            // drain stale packets
-            for _ in 0..10 {
-                if let Some(io) = crate::net::get_io_base() {
-                    unsafe {
-                        let rx = &*core::ptr::addr_of!(crate::net::pci::RX_BUFFER);
-                        crate::net::pci::rtl8139_handler(io, &rx.0);
-                    }
-                }
-                yield_now().await;
-            }
-
-            // ARP resolve
-            if crate::net::arp::lookup(ip).is_none() {
-                crate::net::arp::send_request(ip);
-                for _ in 0..200 {
-                    if let Some(io) = crate::net::get_io_base() {
-                        unsafe {
-                            let rx = &*core::ptr::addr_of!(crate::net::pci::RX_BUFFER);
-                            crate::net::pci::rtl8139_handler(io, &rx.0);
-                        }
-                    }
-                    yield_now().await;
-                    if crate::net::arp::lookup(ip).is_some() {
-                        break;
-                    }
-                }
-            }
-
-            tprintln!("ARP resolved, starting ping...");
-            yield_now().await;
-
-            for seq in 1u16..=4 {
-                crate::net::icmp::take_ping_reply();
-                crate::net::icmp::send_ping(ip, seq);
-                let mut got_reply = false;
-                for _ in 0..2000 {
-                    if let Some(io) = crate::net::get_io_base() {
-                        unsafe {
-                            let rx = &*core::ptr::addr_of!(crate::net::pci::RX_BUFFER);
-                            crate::net::pci::rtl8139_handler(io, &rx.0);
-                        }
-                    }
-                    yield_now().await;
-                    if let Some((reply_seq, reply_ip)) = crate::net::icmp::take_ping_reply() {
-                        if reply_seq == seq {
-                            tprintln!(
-                                "Reply from {}.{}.{}.{}: seq={}",
-                                reply_ip[0],
-                                reply_ip[1],
-                                reply_ip[2],
-                                reply_ip[3],
-                                reply_seq
-                            );
-                            got_reply = true;
-                            break;
-                        }
-                    }
-                }
-                if !got_reply {
-                    tprintln!("Request timeout for seq={}", seq);
-                }
-                yield_now().await;
             }
         }
 

@@ -15,7 +15,7 @@ impl DateTime {
         // 1. Add Minutes
         let mut total_minutes = self.minute as i32 + offset_minutes;
         let mut extra_hours = 0;
-
+        
         if total_minutes >= 60 {
             total_minutes -= 60;
             extra_hours = 1;
@@ -42,7 +42,7 @@ impl DateTime {
         if extra_days > 0 {
             self.day += 1;
             let days_this_month = days_in_month(self.year, self.month);
-
+            
             if self.day > days_this_month {
                 self.day = 1;
                 self.month += 1;
@@ -53,7 +53,7 @@ impl DateTime {
             }
         } else if extra_days < 0 {
             self.day -= 1;
-
+            
             if self.day == 0 {
                 self.month -= 1;
                 if self.month == 0 {
@@ -116,11 +116,7 @@ impl RTC {
 
         DateTime {
             year: year as u16 + 2000, // Assuming 21st century
-            month,
-            day,
-            hour,
-            minute,
-            second,
+            month, day, hour, minute, second
         }
     }
 }
