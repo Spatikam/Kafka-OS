@@ -1,5 +1,3 @@
-use super::geometry::Rect;
-use super::window::Window;
 use bootloader_api::info::{FrameBuffer, FrameBufferInfo, PixelFormat};
 use embedded_graphics::{
     draw_target::DrawTarget,
@@ -8,6 +6,8 @@ use embedded_graphics::{
     prelude::*,
     primitives::{PrimitiveStyle, Rectangle},
 };
+use super::geometry::Rect;
+use super::window::Window;
 
 /// A display driver that wraps the raw framebuffer.
 pub struct FrameBufferDisplay {
@@ -24,24 +24,24 @@ impl FrameBufferDisplay {
         }
     }
 
-    /// Copies a specific intersecting rectangle from a window's private
+    /// Copies a specific intersecting rectangle from a window's private 
     /// buffer directly to the physical screen.
     //pub fn blit_partial(&mut self, overlap: &Rect, window: &Window) {
     pub fn blit_partial(
-        &mut self,
-        overlap: &Rect,
-        source_buffer: &[u8],
-        source_width: u32,
-        source_x: i32,
-        source_y: i32,
-    ) {
+            &mut self, 
+            overlap: &Rect, 
+            source_buffer: &[u8], 
+            source_width: u32, 
+            source_x: i32, 
+            source_y: i32
+        ) {
         let bpp = self.info.bytes_per_pixel;
         let stride = self.info.stride;
 
         for row_offset in 0..overlap.height {
             // 1. Calculate the absolute Y coordinate on the physical screen
             let screen_y = (overlap.y + row_offset) as usize;
-
+            
             // 2. Calculate the local Y coordinate inside the window's private buffer
             // (Where does this overlap start relative to the window's top-left corner?)
             let win_local_y = ((overlap.y + row_offset) - source_y) as usize;
@@ -71,11 +71,11 @@ impl FrameBufferDisplay {
     /// A helper function to fill a damaged Rect with a solid background color
     pub fn fill_rect(&mut self, rect: &Rect, color: embedded_graphics::pixelcolor::Rgb888) {
         use embedded_graphics::prelude::*;
-        use embedded_graphics::primitives::{PrimitiveStyle, Rectangle};
-
+        use embedded_graphics::primitives::{Rectangle, PrimitiveStyle};
+        
         let point = embedded_graphics::geometry::Point::new(rect.x, rect.y);
         let size = embedded_graphics::geometry::Size::new(rect.width as u32, rect.height as u32);
-
+        
         // We can just use embedded-graphics for the solid background fill
         let _ = Rectangle::new(point, size)
             .into_styled(PrimitiveStyle::with_fill(color))
@@ -103,6 +103,7 @@ impl FrameBufferDisplay {
             }
         }
     }
+
 }
 
 impl OriginDimensions for FrameBufferDisplay {
@@ -121,10 +122,8 @@ impl DrawTarget for FrameBufferDisplay {
     {
         for Pixel(point, color) in pixels.into_iter() {
             // Check if point is within bounds
-            if point.x >= 0
-                && point.x < self.info.width as i32
-                && point.y >= 0
-                && point.y < self.info.height as i32
+            if point.x >= 0 && point.x < self.info.width as i32 &&
+               point.y >= 0 && point.y < self.info.height as i32 
             {
                 // Calculate byte offset
                 let pixel_offset = (point.y as usize * self.info.stride) + point.x as usize;
@@ -148,7 +147,7 @@ impl DrawTarget for FrameBufferDisplay {
                     PixelFormat::U8 => {
                         pixel_buffer[0] = ((r as u16 + g as u16 + b as u16) / 3) as u8;
                     }
-                    _ => {} // Ignore unknown formats for now
+                     _ => {} // Ignore unknown formats for now
                 }
             }
         }
