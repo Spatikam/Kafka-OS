@@ -1,6 +1,11 @@
 // src/elf_loader.rs
 use x86_64::{VirtAddr, structures::paging::{Page, PageTableFlags, Mapper, Size4KiB, FrameAllocator}};
 use xmas_elf::{ElfFile, program::{Type, ProgramHeader}};
+use crate::vm::VmProt;
+use crate::vm::VmArea;
+use crate::vm::VmFlags;
+use alloc::vec::Vec;
+
 
 // FIX: Move from 0x400000 to 0x1000_0000 so we don't collide with the Kernel
 const LOAD_OFFSET: u64 = 0x1000_0000;
@@ -26,7 +31,8 @@ where
 
     // src/elf_loader.rs First time in emacs.. hehe will be fun so
 
-    pub fn load(&mut self) -> u64 {
+    pub fn load(&mut self) -> (u64,Vec<VmArea>) {
+        let mut vmas = Vec::new();
         for ph in self.elf.program_iter() {
             if let ProgramHeader::Ph64(header) = ph {
                 if header.get_type().unwrap() == Type::Load {
@@ -35,6 +41,7 @@ where
                     let mem_size = header.mem_size;
                     let file_size = header.file_size;
                     let file_offset = header.offset;
+                    let flags_raw = header.flags;
 
                     let start_page = Page::containing_address(VirtAddr::new(virt_start));
                     let end_page = Page::containing_address(VirtAddr::new(virt_start + mem_size));
@@ -65,11 +72,24 @@ where
                         let data_start = self.elf.input.as_ptr().add(file_offset as usize);
                         core::ptr::copy_nonoverlapping(data_start, dest, file_size as usize);
                     }
+                    // adding the support VMa 
+                    let mut prot = VmProt::READ;
+                    if flags_raw.is_write(){
+                        prot |= VmProt::WRITE;
+                    }
+                    if flags_raw.is_execute(){
+                        prot |= VmProt::EXECUTE;
+                    }
+                    let aligned_start = start_page.start_address();
+                    let aligned_end = end_page.start_address() + 4096u64;
+                    let vma = VmArea::new(aligned_start,aligned_end,prot,VmFlags::ANONYMOUS,);
+                    crate::serial_println!("[ELF] VMA registered: {:#x}-{:#x} prot={:?}",aligned_start.as_u64(), aligned_end.as_u64(), prot);
+                    vmas.push(vma);
                 }
             }
         }
         
-        self.elf.header.pt2.entry_point() + LOAD_OFFSET
+        (self.elf.header.pt2.entry_point() + LOAD_OFFSET,vmas)
     }
         
 }

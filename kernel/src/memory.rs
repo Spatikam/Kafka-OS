@@ -84,3 +84,20 @@ pub unsafe fn create_new_page_table(
     }
     frame
 }
+
+use spin::Mutex;
+
+pub static GLOBAL_FRAME_ALLOCATOR: Mutex<Option<BootInfoFrameAllocator>> = Mutex::new(None);
+pub static GLOBAL_PHYS_MEM_OFFSET: core::sync::atomic::AtomicU64 =core::sync::atomic::AtomicU64::new(0);
+
+pub fn set_global_frame_allocator(alloc: BootInfoFrameAllocator) {
+    *GLOBAL_FRAME_ALLOCATOR.lock() = Some(alloc);
+}
+
+pub fn set_global_phys_offset(offset: u64) {
+    GLOBAL_PHYS_MEM_OFFSET.store(offset, core::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn get_global_phys_offset() -> u64 {
+    GLOBAL_PHYS_MEM_OFFSET.load(core::sync::atomic::Ordering::Relaxed)
+}

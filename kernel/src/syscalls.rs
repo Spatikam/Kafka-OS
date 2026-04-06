@@ -67,7 +67,7 @@ extern "C" fn syscall_handler() {
         );
     }
 }
-
+static BRK_CURRENT:spin::Mutex<u64> = spin::Mutex::new(0x1000_0000);
 #[unsafe(no_mangle)]
 extern "C" fn wrapped_syscall_handler(id: u64, arg1: u64, arg2: u64) -> u64 {
     match id {
@@ -96,6 +96,22 @@ extern "C" fn wrapped_syscall_handler(id: u64, arg1: u64, arg2: u64) -> u64 {
             let mut port = Port::new(0xf4);
             unsafe { port.write(0x10 as u32); }
             0
+        }
+        10 =>{
+            let sched = crate::scheduler::SCHEDULER.lock();
+            sched.current_pid().unwrap_or(0)
+        }
+        11 =>{
+            crate::process::sys_yield();
+            0
+        }
+        12 =>{
+            crate::serial_println!("SYSCALL: Process exiting with code {}", arg1);
+            let mut sched = crate::scheduler::SCHEDULER.lock();
+            sched.exit_current(arg1);
+            drop(sched);
+            crate::println!("KERNEL:No more process halting");
+            loop {x86_64::instructions::hlt();}
         }
 
         // UNKNOWN
