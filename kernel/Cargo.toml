@@ -24,6 +24,7 @@ pc-keyboard = "0.7.0"
 linked_list_allocator = "0.9.0"
 xmas-elf = "0.9.1"
 byteorder = { version = "1.5", default-features = false }
+bitflags = "2.4"
 
 [dependencies.lazy_static]
 version = "1.0"

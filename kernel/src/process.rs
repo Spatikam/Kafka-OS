@@ -24,6 +24,11 @@ pub struct Process {
     pub state: ProcessState,
     pub stack_memory: Vec<u8>,
     pub page_table: PhysFrame,
+    pub vma_list:Vec<crate::vm::VmArea>,
+    pub priority:u8,
+    pub quantum_remaining:u32,
+    pub total_ticks:u64,
+    pub cpu_since_boost: u64,
 }
 
 impl Process {
@@ -46,6 +51,11 @@ impl Process {
             state: ProcessState::Ready,
             stack_memory: stack,
             page_table,
+            vma_list:Vec::new(),
+            priority:0,
+            quantum_remaining:2,
+            total_ticks:0,
+            cpu_since_boost:0,
         }
     }
 
@@ -78,7 +88,10 @@ impl Process {
             let root_table = &mut *page_table_ptr;
             let mut process_mapper = OffsetPageTable::new(root_table, phys_mem_offset);
             let mut loader = crate::elf_loader::ElfLoader::new(elf_data, &mut process_mapper, allocator);
-            let entry_point = loader.load();
+            let (entry_point, _vmas) = loader.load();
+            for vma in _vmas{
+                crate::vm::insert_vma(&mut self.vma_list, vma);
+            }
             Cr3::write(kernel_frame, kernel_flags);
             entry_point
         }
@@ -103,6 +116,8 @@ impl Process {
                 let frame = allocator.allocate_frame().unwrap();
                 process_mapper.map_to(page, frame, flags, allocator).unwrap().flush();
             }
+            let stack_vma = crate::vm::VmArea::new(VirtAddr::new(stack_addr),VirtAddr::new(stack_addr + size + 4096),crate::vm::VmProt::READ | crate::vm::VmProt::WRITE,crate::vm::VmFlags::ANONYMOUS,);
+            crate::serial_println!("[PROC] Stack VMA registered: {:#x}-{:#x}",stack_addr,stack_addr + size);
             Cr3::write(kernel_frame, kernel_flags);
         }
         stack_addr + size
@@ -111,7 +126,8 @@ impl Process {
 
 pub fn sys_yield() {
     x86_64::instructions::interrupts::disable();
-    let mut switch_info: Option<(u64, *mut u64, u64)> = None;
+    //let mut switch_info: Option<(u64, *mut u64, u64)> = None;
+    let switch_info;
     {
         let mut sched = crate::scheduler::SCHEDULER.lock();
         switch_info = sched.rotate_and_get_next();

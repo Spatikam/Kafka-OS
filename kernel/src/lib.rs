@@ -25,6 +25,7 @@ pub mod elf_loader;
 pub mod process;
 pub mod scheduler;
 pub mod gui;
+pub mod vm;
 
 pub fn init() {
     gdt::init();

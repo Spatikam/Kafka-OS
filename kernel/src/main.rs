@@ -20,6 +20,7 @@ use blog_os::elf_loader::ElfLoader;
 use spin::Mutex;
 use blog_os::task::mouse::MouseStream;
 use futures_util::StreamExt;
+use blog_os::vm;
 /*
 use embedded_graphics::{
     pixelcolor::Rgb888,
@@ -85,6 +86,7 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     use x86_64::VirtAddr;
 
     blog_os::init();
+    blog_os::scheduler::init_pit();
 
     let phys_mem_offset = VirtAddr::new(
         boot_info.physical_memory_offset.into_option().unwrap()
@@ -101,10 +103,66 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
     // boot_info.framebuffer is now available here for GUI work
     // let fb = boot_info.framebuffer.as_mut().unwrap();
     // ------------------------------------------
-
+    crate::vm::set_phys_mem_offset(phys_mem_offset.as_u64());
+    crate::vm::init_ref_counts(0);
+    memory::set_global_phys_offset(phys_mem_offset.as_u64());
     blog_os::fs::FILESYSTEM.init_once(|| {
         Mutex::new(blog_os::fs::OverlayFileSystem::new(RAM_DISK))
     });
+    crate::println!("\n[SCHEDULER] Spawning Processes...");
+
+    let mut p0 = process::Process::new(0, "Boot",   4096,  false, &mut frame_allocator, phys_mem_offset);
+    //let mut p1 = process::Process::new(1, "ProcA",  4096,  false, &mut frame_allocator, phys_mem_offset);
+    //p1.init_stack(process_a as u64);
+    //let mut p2 = process::Process::new(2, "ProcB",  4096,  false, &mut frame_allocator, phys_mem_offset);
+    //p2.init_stack(process_b as u64);
+    //let mut p3 = process::Process::new(3, "Shell",  32768, false, &mut frame_allocator, phys_mem_offset);
+    //p3.init_stack(process_shell as u64);
+
+    let mut p_user = process::Process::new(5, "UserApp", 32768, true, &mut frame_allocator, phys_mem_offset);
+    let fs = blog_os::fs::TarFileSystem::new(RAM_DISK);
+    let elf_data_unaligned = fs.read_file("test_app").expect("Could not find test_app");
+    use alloc::vec::Vec;
+    let elf_data = Vec::from(elf_data_unaligned);
+
+    let entry_point = p_user.load_elf(&elf_data, &mut mapper, &mut frame_allocator, phys_mem_offset);
+    let user_stack_top = p_user.allocate_user_stack(0x5000_0000, 20 * 1024, &mut mapper, &mut frame_allocator, phys_mem_offset);
+    crate::println!("User App loaded at Entry Point: {:#x}", entry_point);
+
+    unsafe {
+        USER_ENTRY = entry_point;
+        USER_STACK = user_stack_top;
+        USER_PAGE_TABLE = Some(p_user.page_table);
+    }
+
+    fn user_mode_wrapper() {
+        unsafe {
+            let entry = USER_ENTRY;
+            let stack = USER_STACK;
+            let user_page_table = USER_PAGE_TABLE.expect("User page table not set!");
+            use x86_64::registers::control::Cr3;
+            let flags = Cr3::read().1;
+            Cr3::write(user_page_table, flags);
+            crate::println!("Wrapper: Jumping to User Mode at {:#x}", entry);
+            if entry == 0 {
+                blog_os::process::jump_to_userspace(0x10001580, stack);
+            } else {
+                blog_os::process::jump_to_userspace(entry, stack);
+            }
+        }
+    }
+    p_user.init_stack(user_mode_wrapper as u64);
+
+    {
+        let mut sched = blog_os::scheduler::SCHEDULER.lock();
+        sched.add_process(p0);
+        //sched.add_process(p1);
+        //sched.add_process(p2);
+        //sched.add_process(p3);
+        sched.add_process(p_user);
+    }
+    memory::set_global_frame_allocator(frame_allocator);
+    crate::println!("[SCHEDULER] Starting Multitasking...");
 
     // --- INIT GUI ---
     if let Some(framebuffer) = boot_info.framebuffer.as_ref() {
@@ -159,63 +217,10 @@ fn kernel_main(boot_info: &'static mut BootInfo) -> ! {
         }
     }
 
-    #[cfg(test)]
-    test_main();
+    /*#[cfg(test)]
+    test_main();*/
 
-    crate::println!("\n[SCHEDULER] Spawning Processes...");
-
-    let mut p0 = process::Process::new(0, "Boot",   4096,  false, &mut frame_allocator, phys_mem_offset);
-    let mut p1 = process::Process::new(1, "ProcA",  4096,  false, &mut frame_allocator, phys_mem_offset);
-    p1.init_stack(process_a as u64);
-    let mut p2 = process::Process::new(2, "ProcB",  4096,  false, &mut frame_allocator, phys_mem_offset);
-    p2.init_stack(process_b as u64);
-    let mut p3 = process::Process::new(3, "Shell",  32768, false, &mut frame_allocator, phys_mem_offset);
-    p3.init_stack(process_shell as u64);
-
-    let mut p_user = process::Process::new(5, "UserApp", 32768, true, &mut frame_allocator, phys_mem_offset);
-    let fs = blog_os::fs::TarFileSystem::new(RAM_DISK);
-    let elf_data_unaligned = fs.read_file("test_app").expect("Could not find test_app");
-    use alloc::vec::Vec;
-    let elf_data = Vec::from(elf_data_unaligned);
-
-    let entry_point = p_user.load_elf(&elf_data, &mut mapper, &mut frame_allocator, phys_mem_offset);
-    let user_stack_top = p_user.allocate_user_stack(0x5000_0000, 20 * 1024, &mut mapper, &mut frame_allocator, phys_mem_offset);
-    crate::println!("User App loaded at Entry Point: {:#x}", entry_point);
-
-    unsafe {
-        USER_ENTRY = entry_point;
-        USER_STACK = user_stack_top;
-        USER_PAGE_TABLE = Some(p_user.page_table);
-    }
-
-    fn user_mode_wrapper() {
-        unsafe {
-            let entry = USER_ENTRY;
-            let stack = USER_STACK;
-            let user_page_table = USER_PAGE_TABLE.expect("User page table not set!");
-            use x86_64::registers::control::Cr3;
-            let flags = Cr3::read().1;
-            Cr3::write(user_page_table, flags);
-            crate::println!("Wrapper: Jumping to User Mode at {:#x}", entry);
-            if entry == 0 {
-                blog_os::process::jump_to_userspace(0x10001580, stack);
-            } else {
-                blog_os::process::jump_to_userspace(entry, stack);
-            }
-        }
-    }
-    p_user.init_stack(user_mode_wrapper as u64);
-
-    {
-        let mut sched = blog_os::scheduler::SCHEDULER.lock();
-        sched.add_process(p0);
-        sched.add_process(p1);
-        sched.add_process(p2);
-        sched.add_process(p3);
-        sched.add_process(p_user);
-    }
-
-    crate::println!("[SCHEDULER] Starting Multitasking...");
+    
 
     for _ in 0..100000 { unsafe { core::arch::asm!("nop"); } }
 
@@ -242,7 +247,7 @@ pub unsafe fn test_user_mode(
     let data_unaligned = fs.read_file("./test_app").expect("Failed to find ./test_app");
     let data_aligned = data_unaligned.to_vec();
     let mut loader = blog_os::elf_loader::ElfLoader::new(&data_aligned, mapper, frame_allocator);
-    let entry_point = loader.load();
+    let (entry_point, _vmas) = loader.load();
 
     let stack_addr = 0x5000_0000u64;
     let stack_page = Page::containing_address(VirtAddr::new(stack_addr));

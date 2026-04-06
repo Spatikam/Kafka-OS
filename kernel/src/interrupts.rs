@@ -74,7 +74,7 @@ pub fn init_idt() {
 pub fn uptime_seconds() -> f64 {
     let ticks = TICKS.load(Ordering::Relaxed);
     // Standard PC timer frequency is roughly 18.2 Hz
-    ticks as f64 / 18.2 
+    ticks as f64 / 1000.0
 }
 // --- 3. Exception Handlers ---
 
@@ -87,48 +87,94 @@ extern "x86-interrupt" fn page_fault_handler(
     error_code: PageFaultErrorCode,
 ) {
     use x86_64::registers::control::Cr2;
-    crate::serial_println!("====== EXCEPTION: PAGE FAULT ======");
-    crate::serial_println!("Accessed Address : {:?}", Cr2::read());
-    crate::serial_println!("Error Code       : {:?}", error_code);
-    crate::serial_println!("{:#?}", stack_frame);
-    hlt_loop();
+    let fault_addr = Cr2::read();
+    let resolved = try_resolve_page_fault(fault_addr,error_code);
+    if !resolved{
+        crate::serial_println!("====== EXCEPTION: PAGE FAULT ======");
+        crate::serial_println!("Accessed Address : {:?}", Cr2::read());
+        crate::serial_println!("Error Code       : {:?}", error_code);
+        crate::serial_println!("{:#?}", stack_frame);
+        hlt_loop();
+    }
 }
 
+fn try_resolve_page_fault(fault_addr:x86_64::VirtAddr,error_code:PageFaultErrorCode,) -> bool{
+    use crate::memory::{GLOBAL_FRAME_ALLOCATOR, GLOBAL_PHYS_MEM_OFFSET};
+    use core::sync::atomic::Ordering;
+
+    let phys_offset = GLOBAL_PHYS_MEM_OFFSET.load(Ordering::Relaxed);
+    if phys_offset == 0 {crate::serial_println!("[PF] No physical offset");return false;}
+
+    let mut sched = crate::scheduler::SCHEDULER.lock();
+    let current = match sched.current_process_mut() {
+        Some(p) => p,
+        None => { crate::serial_println!("[PF] No current process, cannot resolve"); return false;}
+    };
+    if current.vma_list.is_empty() {
+        // Process has no VMAs registered — can't do demand paging
+        crate::serial_println!("[PF] Process '{}' has no VMAs", current.name);
+        return false;
+    }
+    let pt_phys = current.page_table.start_address();
+    let pt_virt = x86_64::VirtAddr::new(phys_offset + pt_phys.as_u64());
+    let page_table = unsafe {
+        &mut *(pt_virt.as_mut_ptr::<x86_64::structures::paging::PageTable>())
+    };
+    let mut mapper = unsafe { x86_64::structures::paging::OffsetPageTable::new(page_table,x86_64::VirtAddr::new(phys_offset),)
+    };
+    let mut mapper = unsafe {
+        x86_64::structures::paging::OffsetPageTable::new(page_table,x86_64::VirtAddr::new(phys_offset),)
+    };
+
+    // yeah better call the frame alloc man, 
+    let mut alloc_guard = GLOBAL_FRAME_ALLOCATOR.lock();
+    let allocator = match alloc_guard.as_mut() {
+        Some(a) => a,
+        None => {
+            crate::serial_println!("[PF] No global frame allocator");
+            return false;
+        }
+    };
+    let result = crate::vm::handle_page_fault(fault_addr,error_code,&mut current.vma_list,&mut mapper,allocator,);
+    match result {
+        crate::vm::PageFaultResult::Resolved => { crate::serial_println!("[PF] Fault at {:?} resolved!", fault_addr);true }
+        _ => {
+            crate::serial_println!("[PF] Fault at {:?} NOT resolved", fault_addr);
+            false
+        }
+    }
+}
 extern "x86-interrupt" fn double_fault_handler(
     stack_frame: InterruptStackFrame,
     _error_code: u64,
 ) -> ! {
     panic!("EXCEPTION: DOUBLE FAULT\n{:#?}", stack_frame);
 }
-
-// --- 4. Hardware Interrupt Handlers ---
-
 extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFrame) {
-    // print!("."); // Uncomment to see timer ticks
-    TICKS.fetch_add(1,Ordering::Relaxed);
+    TICKS.fetch_add(1, Ordering::Relaxed);
+    crate::scheduler::SCHEDULER_TICKS.fetch_add(1, Ordering::Relaxed);
 
-    // Increment the heartbeat
     let ticks = graphics::PIT_TICKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
-    
-    // Every ~1 second (18 ticks), ring the alarm clock!
-    if ticks % 18 == 0 {
+
+    // Wake compositor ~60fps changed from 18Hz to 1000Hz.
+    if ticks % 16 == 0 {
         graphics::CLOCK_TICK.store(true, core::sync::atomic::Ordering::Relaxed);
-        
-        // Wake up the Compositor!
-        /*if let Some(waker) = crate::gui::graphics::COMPOSITOR_WAKER.lock().take() {
+        if let Some(waker) = crate::gui::graphics::COMPOSITOR_WAKER.lock().take() {
             waker.wake();
-        }*/
-        if SNAKE_ACTIVE.load(Ordering::Relaxed)  || ticks % 18 == 0 {
-            if let Some(waker) = crate::gui::graphics::COMPOSITOR_WAKER.lock().take() {
-                waker.wake();
-            }
         }
     }
     unsafe {
-        PICS.lock()
-            .notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
+        PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
     }
-    crate::process::sys_yield();
+
+    let should_switch = {
+        let mut sched = crate::scheduler::SCHEDULER.lock();
+        sched.timer_tick()
+    };
+
+    if should_switch {
+        crate::process::sys_yield();
+    }
 }
 
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
