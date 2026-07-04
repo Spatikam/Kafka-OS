@@ -10,7 +10,7 @@ pub mod fixed_size_block;
 pub mod linked_list;
 
 pub const HEAP_START: usize = 0x_4444_4444_0000;
-pub const HEAP_SIZE: usize = 20 *1024 * 1024; // changed to 16 MB , heap size too small !! .
+pub const HEAP_SIZE: usize = 20 *1024 * 1024;
 
 #[global_allocator]
 static ALLOCATOR: Locked<FixedSizeBlockAllocator> = Locked::new(FixedSizeBlockAllocator::new());
@@ -34,20 +34,6 @@ pub fn init_heap(mapper: &mut impl Mapper<Size4KiB>,frame_allocator: &mut impl F
 
     Ok(())
 }
-
-// I mean using for testing (will clean up during Code clean up)
-pub struct Dummy;
-
-unsafe impl GlobalAlloc for Dummy {
-    unsafe fn alloc(&self, _layout: Layout) -> *mut u8 {
-        null_mut()
-    }
-
-    unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
-        panic!("dealloc should be never called")
-    }
-}
-
 /// A wrapper around spin::Mutex to permit trait implementations.
 pub struct Locked<A> {
     inner: spin::Mutex<A>,

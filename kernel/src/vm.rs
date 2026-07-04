@@ -367,7 +367,7 @@ pub fn cow_fork_vmas(parent_vmas: &mut Vec<VmArea>) -> Vec<VmArea> {
 
     child_vmas
 }
-
+// CoW is dead until fork exists. Fix the remap when wiring up fork
 pub unsafe fn mark_pages_readonly_for_cow(
     vma_list: &[VmArea],
     mapper: &mut OffsetPageTable<'_>,

@@ -21,11 +21,7 @@ use spin::Mutex;
 use blog_os::task::mouse::MouseStream;
 use futures_util::StreamExt;
 use blog_os::vm;
-/*
-use embedded_graphics::{
-    pixelcolor::Rgb888,
-    prelude::*,
-};*/
+
 use embedded_graphics::{
     draw_target::DrawTarget,
     geometry::Point,

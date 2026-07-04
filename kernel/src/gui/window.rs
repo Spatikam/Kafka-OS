@@ -13,6 +13,7 @@ use embedded_graphics::{
 
 use crate::gui::graphics::{UIEvent, RawMouse, APP_REQUESTS, report_damage};
 use crate::{exit_qemu,QemuExitCode};
+use core::cmp::Ordering;
 //use crate::gui::paint::{PAINT_APP};
 use core::convert::Infallible;
 
@@ -62,6 +63,8 @@ pub struct Window {
     pub event_queue: Vec<UIEvent>, // Event Queue for event handling
     pub close_btn: bool, // Close Button Implementation
     pub is_minimized:bool,
+    pub is_maximized:bool,
+    pub restore_rect: Option<(i32, i32, u32, u32)>, // x, y, w, h before maximize
     pub was_minimized: bool,
     pub is_dragging: bool, // is Window being dragged Windows
     pub drag_x: i32,
@@ -70,6 +73,7 @@ pub struct Window {
     pub resize_edge:Option<ResizeEdge>,
     pub min_width:u32,
     pub min_height:u32,
+    pub maximizable:bool,
 
     pub app_state: AppState,
 }
@@ -97,6 +101,9 @@ impl Window {
             min_width:80,
             min_height:60,
             app_state: AppState::None,
+            is_maximized:false,
+            maximizable:true,
+            restore_rect: None,
         }
     }
     // Constructor For Application Specific Windows
@@ -140,6 +147,14 @@ impl Window {
             .into_styled(PrimitiveStyle::with_fill(Rgb888::BLACK))
             .draw(self)
             .unwrap();
+        // maximize
+        if self.maximizable{
+            Rectangle::new(Point::new(self.width as i32 - 40, 0), Size::new(20, 20))
+                .into_styled(PrimitiveStyle::with_fill(Rgb888::new(0, 160, 80))).draw(self).unwrap();
+            Rectangle::new(Point::new(self.width as i32 - 34, 5), Size::new(9, 9))
+                .into_styled(PrimitiveStyle::with_stroke(Rgb888::BLACK, 1)).draw(self).unwrap();
+        }    
+        
         // Drawing the Close Button
         Rectangle::new(Point::new(self.width as i32 - 20, 0), Size::new(20, 20))
             .into_styled(PrimitiveStyle::with_fill(Rgb888::RED))
@@ -327,9 +342,12 @@ impl Window {
 
                             if self.width as i32 - 20 <= x && x <= self.width as i32 - 2 && 1 <= y && y <= 19 {
                                 self.close_btn = true;
-                            }else if self.width as i32 - 40 <= x  &&  x< self.width as i32 - 20 && 1 <= y && y <= 19{
+                            }else if self.maximizable  && self.width as i32 - 40 <= x  &&  x< self.width as i32 - 20 && 1 <= y && y <= 19{
+                                self.toggle_maximize();
+                            }else if self.width as i32 - 60 <= x && x < self.width as i32 - 40 && 1 <= y && y <= 19 {
                                 self.is_minimized = true;
-                            }else if 0 <= x && x <= self.width as i32 - 21 && 0 <= y && y <= 20 {
+                            } 
+                            else if 0 <= x && x <= self.width as i32 - 21 && 0 <= y && y <= 20 {
                                 self.is_dragging = true;
                                 self.drag_x = x;
                                 self.drag_y = y;
@@ -351,13 +369,14 @@ impl Window {
     // Power Menu
     pub fn render_power_menu(&mut self) {
         // 1. Draw the standard background and border
+        self.maximizable = false;
         self.render_internal_graphics();
 
         // 2. Draw the 3 Menu Options
         let style = MonoTextStyle::new(&FONT_8X13, Rgb888::WHITE);
         
         // Sleep (y = 40)
-        Text::new("Sleep", Point::new(10, 40), style).draw(self).unwrap();
+        //Text::new("Sleep", Point::new(10, 40), style).draw(self).unwrap();
         // Restart (y = 65)
         Text::new("Restart", Point::new(10, 65), style).draw(self).unwrap();
         // Shutdown (y = 90)
@@ -370,6 +389,7 @@ impl Window {
     // Applications Menu
     pub fn render_app_menu(&mut self) {
         // 1. Draw standard background/borders
+        self.maximizable = false;
         self.render_internal_graphics();
 
         // 2. Draw 3 Placeholder Apps
@@ -861,6 +881,53 @@ impl Window {
                 max_y - min_y,
             ));
         }
+    }
+    pub fn toggle_maximize(&mut self){
+        let sw = super::graphics::SCREEN_WIDTH.load(core::sync::atomic::Ordering::Relaxed);
+        let sh = super::graphics::SCREEN_HEIGHT.load(core::sync::atomic::Ordering::Relaxed);
+        let taskbar_h = 30; // matches your drag-clamp min in graphics.rs
+
+        let old = Rect::new(self.x, self.y, self.width as i32, self.height as i32);
+
+        if self.is_maximized {
+            if let Some((rx, ry, rw, rh)) = self.restore_rect.take() {
+                self.x = rx; self.y = ry; self.width = rw; self.height = rh;
+            }
+            self.is_maximized = false;
+            report_damage(old);
+        } else {
+
+            self.restore_rect = Some((self.x, self.y, self.width, self.height));
+            self.x = 0;
+            self.y = taskbar_h;
+            self.width = sw as u32;
+            self.height = (sh - taskbar_h) as u32;
+            self.is_maximized = true;
+        }
+        self.is_dragging = false;
+        self.buffer = alloc::vec![0u8; (self.width * self.height * self.bpp as u32) as usize];
+        self.redraw();
+        report_damage(Rect::new(self.x, self.y, self.width as i32, self.height as i32));
+
+    }
+    fn redraw(&mut self) {
+        match &self.app_state {
+            AppState::FileExplorer { .. } => self.render_file_explorer(),
+            AppState::Calculator   { .. } => self.render_calculator(),
+            AppState::Snake        { .. } => self.render_snake(),
+            AppState::Terminal     { .. } => {
+                self.render_internal_graphics();
+                let mut t = super::terminal::GUI_TERMINAL.lock();
+                t.needs_redraw = true;
+                t.needs_full_redraw = true; // compositor re-syncs terminal into the resized window
+            }
+            AppState::Paint { .. } => {
+                self.render_internal_graphics();
+                super::paint::PAINT_APP.lock().needs_redraw = true;
+            }
+            AppState::None => self.render_internal_graphics(),
+
+        }   
     }
 
 }
