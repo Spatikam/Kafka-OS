@@ -157,26 +157,27 @@ extern "x86-interrupt" fn timer_interrupt_handler(_stack_frame: InterruptStackFr
     let ticks = graphics::PIT_TICKS.fetch_add(1, core::sync::atomic::Ordering::Relaxed);
 
     // Wake compositor ~60fps changed from 18Hz to 1000Hz.
-    if ticks % 16 == 0 {
-        graphics::CLOCK_TICK.store(true, core::sync::atomic::Ordering::Relaxed);
-        if let Some(waker) = crate::gui::graphics::COMPOSITOR_WAKER.lock().take() {
-            waker.wake();
+    if ticks % 16 == 0{
+        graphics::CLOCK_TICK.store(true,Ordering::Relaxed);
+        if let Some(mut guard) = crate::gui::graphics::COMPOSITOR_WAKER.try_lock(){
+            if let Some(waker) = guard.take(){
+                waker.wake();
+            }
         }
     }
     unsafe {
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Timer.as_u8());
     }
 
-    let should_switch = {
-        let mut sched = crate::scheduler::SCHEDULER.lock();
-        sched.timer_tick()
+    let should_switch = match crate::scheduler::SCHEDULER.try_lock(){
+        Some(mut sched) => sched.timer_tick(),
+        None=>false,
     };
 
     if should_switch {
         crate::process::sys_yield();
     }
 }
-
 extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStackFrame) {
     use x86_64::instructions::port::Port;
 
@@ -184,7 +185,7 @@ extern "x86-interrupt" fn keyboard_interrupt_handler(_stack_frame: InterruptStac
     let scancode:u8 = unsafe {port.read()};
     crate::task::keyboard::add_scancode(scancode);
     if SNAKE_ACTIVE.load(Ordering::Relaxed){
-        SNAKE_SCANCODES.lock().push(scancode);
+        if let Some(mut v) = SNAKE_SCANCODES.try_lock() { v.push(scancode); }
     }
     unsafe{
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Keyboard.as_u8());
@@ -199,9 +200,6 @@ extern "x86-interrupt" fn mouse_interrupt_handler(_stack_frame: InterruptStackFr
         PICS.lock().notify_end_of_interrupt(InterruptIndex::Mouse.as_u8());
     }
 }
-
-// --- 5. Tests ---
-
 #[test_case]
 fn test_breakpoint_exception() {
     x86_64::instructions::interrupts::int3();

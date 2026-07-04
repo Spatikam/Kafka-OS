@@ -51,6 +51,10 @@ pub static PIT_TICKS: AtomicUsize = AtomicUsize::new(0);
 // A flag to tell the Compositor "A second has passed, update the clock!"
 pub static CLOCK_TICK: AtomicBool = AtomicBool::new(false);
 
+pub static SCREEN_WIDTH: AtomicI32 = AtomicI32::new(0);
+pub static SCREEN_HEIGHT: AtomicI32 = AtomicI32::new(0);
+
+
 // For Opening Apps and Using them
 #[derive(Clone, Copy)]
 pub enum AppRequest {
@@ -628,10 +632,10 @@ pub fn render_splash_screen(display: &mut FrameBufferDisplay, screen_width: i32,
 }
 
 pub fn setup_desktop(screen_width: i32, screen_height: i32, bpp: usize) -> WindowManager {
+    SCREEN_WIDTH.store(screen_width, Ordering::Relaxed);
+    SCREEN_HEIGHT.store(screen_height, Ordering::Relaxed);
     let mut wm = WindowManager::new(screen_width as u32, screen_height as u32);
-
     report_damage(Rect::new(0, 0, screen_width, screen_height));
-
     wm
 }
 

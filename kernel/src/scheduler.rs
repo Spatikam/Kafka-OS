@@ -222,6 +222,7 @@ impl Scheduler {
                 proc.cpu_since_boost = 0;
                 proc.quantum_remaining = self.quantum_for(0);
                 self.queues[0].push_back(proc);
+                boosted_count +=1;
             }
         }
         if let Some(ref mut proc) = self.current {
@@ -237,19 +238,12 @@ impl Scheduler {
         // Recalculate dynamics after boost (process states may have changed)
         self.recalculate_dynamics();
     }
-    pub fn exit_current(&mut self, exit_code: u64) {
+    pub fn exit_current(&mut self, exit_code: u64) -> Option<(u64, u64)> {
         if let Some(proc) = self.current.take() {
-            crate::serial_println!( "[MLFQ] Process '{}' (PID {}) exited with code {}. Total CPU: {} ticks",proc.name, proc.id.0, exit_code, proc.total_ticks);
+            crate::serial_println!("[MLFQ] Process '{}' (PID {}) exited with code {}. Total CPU: {} ticks",proc.name, proc.id.0, exit_code, proc.total_ticks);
         }
-
         self.recalculate_dynamics();
-        if let Some((new_stack, _, new_cr3)) = self.pick_and_run() {
-            let mut dummy_old_sp: u64 = 0;
-            let old_sp_ptr = &mut dummy_old_sp as *mut u64;
-            unsafe {
-                crate::process::context_switch(old_sp_ptr, new_stack, new_cr3);
-            }
-        }
+        self.pick_and_run().map(|(new_stack, _, new_cr3)| (new_stack, new_cr3))
     }
     pub fn current_pid(&self) -> Option<u64> {
         self.current.as_ref().map(|p| p.id.0)

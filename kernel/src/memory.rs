@@ -30,30 +30,37 @@ unsafe impl FrameAllocator<Size4KiB> for EmptyFrameAllocator {
 
 pub struct BootInfoFrameAllocator {
     memory_map: &'static MemoryRegions,
-    next: usize,
+    region_idx:usize,
+    next_addr:u64,
 }
 
 impl BootInfoFrameAllocator {
     pub unsafe fn init(memory_map: &'static MemoryRegions) -> Self {
-        BootInfoFrameAllocator {
-            memory_map,
-            next: 0,
+        let mut alloc = BootInfoFrameAllocator{memory_map,region_idx:0,next_addr:0};
+        alloc.seek_region_start();
+        alloc
+    }
+    fn seek_region_start(&mut self) {
+        if self.region_idx < self.memory_map.len() {
+            let start = self.memory_map[self.region_idx].start;
+            self.next_addr = (start + 0xfff) & !0xfff; // align up to 4 KiB
         }
     }
 
-    fn usable_frames(&self) -> impl Iterator<Item = PhysFrame> {
-        let usable_regions = self.memory_map.iter().filter(|r| r.kind == MemoryRegionKind::Usable);
-        let addr_ranges = usable_regions.map(|r| r.start..r.end);
-        let frame_addresses = addr_ranges.flat_map(|r| r.step_by(4096));
-        frame_addresses.map(|addr| PhysFrame::containing_address(PhysAddr::new(addr)))
-    }
 }
-
 unsafe impl FrameAllocator<Size4KiB> for BootInfoFrameAllocator {
     fn allocate_frame(&mut self) -> Option<PhysFrame> {
-        let frame = self.usable_frames().nth(self.next);
-        self.next += 1;
-        frame
+        while self.region_idx < self.memory_map.len() {
+            let region = &self.memory_map[self.region_idx];
+            if region.kind == MemoryRegionKind::Usable && self.next_addr + 4096 <= region.end {
+                let frame = PhysFrame::containing_address(PhysAddr::new(self.next_addr));
+                self.next_addr += 4096;
+                return Some(frame);
+            }
+            self.region_idx += 1;
+            self.seek_region_start();
+        }
+        None
     }
 }
 

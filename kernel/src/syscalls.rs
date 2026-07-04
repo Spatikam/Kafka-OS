@@ -107,11 +107,12 @@ extern "C" fn wrapped_syscall_handler(id: u64, arg1: u64, arg2: u64) -> u64 {
         }
         12 =>{
             crate::serial_println!("SYSCALL: Process exiting with code {}", arg1);
-            let mut sched = crate::scheduler::SCHEDULER.lock();
-            sched.exit_current(arg1);
-            drop(sched);
-            crate::println!("KERNEL:No more process halting");
-            loop {x86_64::instructions::hlt();}
+            let target = crate::scheduler::SCHEDULER.lock().exit_current(arg1);
+            if let Some((new_stack,new_cr3)) = target {   //page table address -> cr3.. ya ppe map karenge
+                let mut dummy:u64 = 0;
+                unsafe { crate::process::context_switch(&mut dummy, new_stack, new_cr3); }
+            }
+            loop {x86_64::instructions::hlt();}  // agar process hi  nahi hai toh halt kar bc !! 
         }
 
         // UNKNOWN
