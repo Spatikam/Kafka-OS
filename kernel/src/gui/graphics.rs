@@ -170,6 +170,8 @@ pub async fn compositor_task(display: &mut FrameBufferDisplay, mut wm: WindowMan
                         AppState::FileExplorer {
                             current_path: alloc::string::String::new(),
                             displayed_entries: alloc::vec::Vec::new(),
+                            selected_row:None,
+                            scroll_offset:0,
                         }
                     );
                     file_win.render_file_explorer(); 
